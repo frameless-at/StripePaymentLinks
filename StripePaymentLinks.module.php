@@ -20,8 +20,8 @@ use ProcessWire\ConfigurableModule;
  *
  * PHP 8+, ProcessWire 3.0.210+
  */
-class StripePaymentLinks extends WireData implements Module, ConfigurableModule
-{
+ 
+class StripePaymentLinks extends WireData implements Module, ConfigurableModule {
 	/** Paths */
 	protected string $stripeSdkPath;
 	protected string $moduleMailLayout;
@@ -37,7 +37,10 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule
 	private ?PLApiController $apiService   = null;
 
 	/**
-	 * Central i18n default texts (key schema: CHANNEL.TYPE.IDENT).
+	 * Returns the default internationalized texts used throughout the module.
+	 * Keys use the schema: CHANNEL.TYPE.IDENT.
+	 *
+	 * @return array Associative array of text keys and values.
 	 */
 	private function defaultTexts(): array {
 	  return [
@@ -148,9 +151,13 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule
 		'ui.ajax.error_server'      => $this->_('Server error.'),
 	  ];
 	}
-
-	public static function getModuleInfo(): array
-	{
+	
+	/**
+	 * Returns ProcessWire module info array.
+	 *
+	 * @return array Module metadata for ProcessWire.
+	 */
+	public static function getModuleInfo(): array {
 		return [
 			'title'       => 'StripePaymentLinks',
 			'version'     => '1.0.0', 
@@ -165,9 +172,12 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule
 
 	/* ========================= Lifecycle ========================= */
 
-	/** @inheritDoc */
-	public function init(): void
-	{
+	/**
+	 * Initializes the module, sets up paths, hooks, and verifies mail layout presence.
+	 *
+	 * @inheritDoc
+	 */
+	public function init(): void {
 		$this->stripeSdkPath    = __DIR__ . '/vendor/stripe-php/init.php';
 		$this->moduleMailLayout = __DIR__ . '/includes/mail/layout.html.php';
 		if (!is_file($this->moduleMailLayout)) {
@@ -189,20 +199,37 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule
 			$this->ensureCustomerRoleExists();
 		});
 	}
-
+	
+	/**
+	 * Installs the module, ensuring required fields and roles are present.
+	 *
+	 * @return void
+	 */
 	public function ___install(): void {
 		$this->ensureFields();
 		$this->ensureProductFields();
 		$this->ensureCustomerRoleExists();
 	}
-
+	
+	/**
+	 * Upgrades the module, re-ensuring required fields and roles.
+	 *
+	 * @param mixed $fromVersion Previous version.
+	 * @param mixed $toVersion New version.
+	 * @return void
+	 */
 	public function ___upgrade($fromVersion, $toVersion): void {
 		$this->ensureFields();
 		$this->ensureProductFields();
 		$this->ensureCustomerRoleExists();
 	}
-	public function ___uninstall(): void
-	{
+	
+	/**
+	 * Uninstalls the module, detaching fields, removing roles, deleting logs, and cleaning up.
+	 *
+	 * @return void
+	 */
+	public function ___uninstall(): void {
 		$fields     = $this->wire('fields');
 		$templates  = $this->wire('templates');
 		$roles      = $this->wire('roles');
@@ -347,7 +374,15 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule
 	}
 	
 	/* ========================= Public API ========================= */
-
+	
+	/**
+	 * Renders the appropriate modals, access blocks, and JS for the current page context.
+	 *
+	 * Handles product access gating, thank-you blocks, password reset flows, and modal rendering.
+	 *
+	 * @param Page $currentPage The current ProcessWire page.
+	 * @return string Rendered HTML for modals, access blocks, and scripts.
+	 */
 	public function render(Page $currentPage): string{
 		$this->processCheckout($currentPage);
 		$this->handleAccessParam();
@@ -478,14 +513,21 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule
 		// 7) One-off notices + global AJAX handler
 		$out .= $this->modal()->renderModalNotice();
 		$out .= $this->modal()->globalAjaxHandlerJs();
-	
+		
+		// 8) Auto-load Bootstrap via CDN if enabled and not present
+		$out .= $this->renderBootstrapFallback();
+		
 		return $out;
 	}
 						
 	/**
-	 * Process Stripe ?session_id – map purchases, attach to user, park access links, send mail.
+	 * Processes Stripe checkout by verifying session, mapping purchases, attaching to user,
+	 * and sending access mails. Also manages login and access links.
+	 *
+	 * @param Page $currentPage The current ProcessWire page.
+	 * @return void
 	 */
-public function processCheckout(Page $currentPage): void {
+	 public function processCheckout(Page $currentPage): void {
 		 $input     = $this->wire('input');
 		 $session   = $this->wire('session');
 		 $users     = $this->wire('users');
@@ -672,9 +714,12 @@ public function processCheckout(Page $currentPage): void {
 		 }
 	 }
 
-	/** Handle ?access=… (soft login or notice + security logging) */
-	public function handleAccessParam(): void
-	{
+	/**
+	  * Handles access tokens in ?access query parameter for soft logins or expired notices.
+	  *
+	  * @return void
+	  */
+	public function handleAccessParam(): void{
 		$input   = $this->wire('input');
 		$session = $this->wire('session');
 		$users   = $this->wire('users');
@@ -708,7 +753,12 @@ public function processCheckout(Page $currentPage): void {
 
 	/* ========================= Text access ========================= */
 
-	/** Decide whether to send access mail after checkout based on policy. */
+	/**
+	 * Determines if access mail should be sent after checkout, based on policy and user type.
+	 *
+	 * @param bool $isNewUser True if this is a newly created user.
+	 * @return bool True if access mail should be sent.
+	 */
 	private function shouldSendAccessMail(bool $isNewUser): bool {
 		$policy = (string)($this->accessMailPolicy ?? 'newUsersOnly');
 		return match ($policy) {
@@ -719,34 +769,64 @@ public function processCheckout(Page $currentPage): void {
 		};
 	}
 	
-	/** Return a default text by key (no runtime overrides). */
+	/**
+	 * Retrieves a default text by key from internationalized module texts.
+	 *
+	 * @param string $key Text key identifier.
+	 * @return string The translated text or empty string if not found.
+	 */
 	public function t(string $key): string {
 		$D = $this->defaultTexts();
 		return $D[$key] ?? '';
 	}
 
-	/** Mail layout path (site override or module default). */
+	/**
+	 * Returns the absolute path to the mail layout template, considering site override.
+	 *
+	 * @return string Path to mail layout template.
+	 */
 	public function mailLayoutPath(): string {
 		$layoutPath = (string)($this->mailTemplatePath ?? '');
 		if ($layoutPath && is_file($layoutPath)) return $layoutPath;
 		return $this->moduleMailLayout;
 	}
 
-	/** API URL (absolute). */
+	/**
+	 * Returns the absolute API endpoint URL for the module.
+	 *
+	 * @return string API URL.
+	 */
 	public function apiUrl(): string {
 		return rtrim($this->wire('config')->urls->root, '/') . '/stripepaymentlinks/api';
 	}
 
 	/* ========================= Services (lazy) ========================= */
 
+	/**
+	 * Returns a lazily-loaded PLMailService instance.
+	 *
+	 * @return PLMailService
+	 */
 	public function mail(): PLMailService {
 		if (!$this->mailService) { require_once __DIR__ . '/includes/PLMailService.php'; $this->mailService = new PLMailService(); }
 		return $this->mailService;
 	}
+	
+	/**
+	 * Returns a lazily-loaded PLModalService instance.
+	 *
+	 * @return PLModalService
+	 */
 	public function modal(): PLModalService {
 		if (!$this->modalService) { require_once __DIR__ . '/includes/PLModalService.php'; $this->modalService = new PLModalService($this); }
 		return $this->modalService;
 	}
+	
+	/**
+	 * Returns a lazily-loaded PLApiController instance.
+	 *
+	 * @return PLApiController
+	 */
 	public function api(): PLApiController {
 		if (!$this->apiService) { require_once __DIR__ . '/includes/PLApiController.php'; $this->apiService = new PLApiController($this); }
 		return $this->apiService;
@@ -754,6 +834,12 @@ public function processCheckout(Page $currentPage): void {
 
 	/* ========================= Model/Install helpers ========================= */
 
+	/**
+	 * Maps a Stripe checkout line item to a corresponding product Page in ProcessWire.
+	 *
+	 * @param mixed $li Stripe line item object.
+	 * @return Page|null The matched product Page or null if not found.
+	 */
 	private function mapStripeLineItemToProduct($li): ?\ProcessWire\Page {
 		$pages     = $this->wire('pages');
 		$sanitizer = $this->wire('sanitizer');
@@ -804,8 +890,14 @@ public function processCheckout(Page $currentPage): void {
 		return null;
 	}
 
-	protected function ensureFields(): void
-	{
+	/**
+	 * Ensures required user fields and repeater structure exist for purchases.
+	 *
+	 * Adds fields to the user template and configures fieldgroup contexts.
+	 *
+	 * @return void
+	 */
+	protected function ensureFields(): void {
 		$fields    = $this->wire('fields');
 		$templates = $this->wire('templates');
 		$modules   = $this->wire('modules');
@@ -880,8 +972,13 @@ public function processCheckout(Page $currentPage): void {
 		}
 	}
 
-	protected function ensureProductFields(?array $templateNames = null): void
-	{
+	/**
+	 * Ensures required product fields are present on configured product templates.
+	 *
+	 * @param array|null $templateNames List of template names to ensure fields on.
+	 * @return void
+	 */
+	protected function ensureProductFields(?array $templateNames = null): void {
 		$fields     = $this->wire('fields');
 		$templates  = $this->wire('templates');
 		$modules    = $this->wire('modules');
@@ -923,15 +1020,81 @@ public function processCheckout(Page $currentPage): void {
 			if ($changed) $fg->save();
 		}
 	}
-
+	
+	/** Small helper to JSON-escape strings safely for inline JS. */
+	private function jsq(string $s): string {
+		return json_encode($s, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+	}
+	
+	/** Render a CDN-based Bootstrap loader if Bootstrap is not present. */
+	private function renderBootstrapFallback(): string
+	{
+		// Respect config toggle
+		if (!(bool)($this->autoLoadBootstrap ?? false)) return '';
+	
+		$css = (string)($this->bootstrapCssCdn ?? 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css');
+		$js  = (string)($this->bootstrapJsCdn  ?? 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js');
+	
+		$cssJson = $this->jsq($css);
+		$jsJson  = $this->jsq($js);
+	
+		return <<<HTML
+	<script>
+	(function(){
+	  // Avoid duplicate injection
+	  if (window.bootstrap || document.getElementById('spl-bootstrap-js')) return;
+	
+	  function inject(tag, attrs){
+		var el = document.createElement(tag);
+		for (var k in attrs) el.setAttribute(k, attrs[k]);
+		(document.head || document.documentElement).appendChild(el);
+		return el;
+	  }
+	
+	  // Inject CSS if not already present
+	  var haveCss = Array.prototype.some.call(document.styleSheets || [], function(ss){
+		try { return (ss.href || '').indexOf('/bootstrap') !== -1 || (ss.ownerNode && ss.ownerNode.id === 'spl-bootstrap-css'); }
+		catch(e){ return false; }
+	  });
+	  if (!haveCss) {
+		inject('link', { id: 'spl-bootstrap-css', rel: 'stylesheet', href: {$cssJson}, crossorigin: 'anonymous' });
+	  }
+	
+	  // Inject JS bundle (with Popper)
+	  inject('script', { id: 'spl-bootstrap-js', src: {$jsJson}, async: true, defer: true, crossorigin: 'anonymous' });
+	})();
+	</script>
+	HTML;
+	}
+	
+	/**
+	 * Determines if a product allows multiple purchases for the same user.
+	 *
+	 * @param Page $product Product page.
+	 * @return bool True if multiple purchases are allowed.
+	 */
 	protected function productAllowsMultiple(Page $product): bool {
 		return (bool)($product->get('allow_multiple_purchases') ?? false);
 	}
+	
+	/**
+	 * Determines if a product requires access restriction (gated delivery page).
+	 *
+	 * @param Page $product Product page.
+	 * @return bool True if access is required.
+	 */
 	protected function productRequiresAccess(Page $product): bool {
 		return (bool)($product->get('requires_access') ?? false);
 	}
 
-	protected function hasPurchasedProduct(User $user, Page $product): bool{
+	/**
+	 * Checks if a user has purchased a given product, considering legacy and modern storage formats.
+	 *
+	 * @param User $user The user to check.
+	 * @param Page $product The product page.
+	 * @return bool True if the user has purchased the product.
+	 */
+	protected function hasPurchasedProduct(User $user, Page $product): bool {
 		if (!$user->hasField('purchases') || !$user->purchases->count()) return false;
 		$targetId = (int) $product->id;
 	
@@ -960,8 +1123,15 @@ public function processCheckout(Page $currentPage): void {
 		return false;
 	}
 
-	protected function attachPurchase(User $user, Page $product, $checkoutSession): void
-	{
+	/**
+	 * Attaches a purchase record to a user for a specific product and checkout session.
+	 *
+	 * @param User $user The user making the purchase.
+	 * @param Page $product The product purchased.
+	 * @param mixed $checkoutSession Stripe checkout session object/array.
+	 * @return void
+	 */
+	protected function attachPurchase(User $user, Page $product, $checkoutSession): void {
 		if (!$user->hasField('purchases')) return;
 
 		$user->of(false);
@@ -984,8 +1154,12 @@ public function processCheckout(Page $currentPage): void {
 		}
 	}
 
-	protected function ensureCustomerRoleExists(): void
-	{
+	/**
+	 * Ensures the "customer" role exists in ProcessWire and has page-view permission.
+	 *
+	 * @return void
+	 */
+	protected function ensureCustomerRoleExists(): void {
 		$roles       = $this->wire('roles');
 		$permissions = $this->wire('permissions');
 
@@ -1007,8 +1181,13 @@ public function processCheckout(Page $currentPage): void {
 		}
 	}
 
-	protected function ensureCustomerRole(User $user): void
-	{
+	/**
+	 * Ensures a user has the "customer" role, adding it if missing.
+	 *
+	 * @param User $user The user to modify.
+	 * @return void
+	 */
+	protected function ensureCustomerRole(User $user): void {
 		$roles = $this->wire('roles');
 		$users = $this->wire('users');
 
@@ -1029,8 +1208,14 @@ public function processCheckout(Page $currentPage): void {
 		}
 	}
 
-	protected function createAccessToken(User $user, int $ttlSeconds): string
-	{
+	/**
+	 * Creates a new access token for the user and sets its expiry.
+	 *
+	 * @param User $user The user to update.
+	 * @param int $ttlSeconds Time-to-live in seconds for the token.
+	 * @return string The generated access token.
+	 */
+	protected function createAccessToken(User $user, int $ttlSeconds): string {
 		$token = bin2hex(random_bytes(32));
 		$user->of(false);
 		if ($user->hasField('access_token'))   $user->access_token   = $token;

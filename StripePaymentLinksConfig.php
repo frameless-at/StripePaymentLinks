@@ -4,10 +4,20 @@ use ProcessWire\InputfieldWrapper;
 use ProcessWire\ModuleConfig;
 use ProcessWire\Inputfield;
 
-class StripePaymentLinksConfig extends ModuleConfig
-{
-	/** Defaults mirror the old UI’s implicit values */
-	public function getDefaults()
+/**
+ * StripePaymentLinksConfig
+ * 
+ * Configuration class for StripePaymentLinks module.
+ * Provides default configuration values and builds the configuration UI.
+ */
+class StripePaymentLinksConfig extends ModuleConfig {
+
+	/**
+ 	* Get the default configuration values.
+ 	* 
+ 	* @return array Associative array of default config values.
+ 	*/
+ 	public function getDefaults()
 	{
 		$cfg = $this->config; // available in ModuleConfig
 		return [
@@ -29,9 +39,12 @@ class StripePaymentLinksConfig extends ModuleConfig
 		];
 	}
 
-	/** Build config UI exactly like PLConfigUi::build */
-	public function getInputfields()
-	{
+	/**
+	 * Build the configuration UI input fields.
+	 * 
+	 * @return InputfieldWrapper Returns an InputfieldWrapper containing all config input fields.
+	 */
+	public function getInputfields() {
 		/** @var InputfieldWrapper $inputfields */
 		$inputfields = $this->modules->get('InputfieldWrapper');
 
@@ -162,7 +175,36 @@ class StripePaymentLinksConfig extends ModuleConfig
 		$fsMail->add($sig);
 
 		$inputfields->add($fsMail);
-
+		
+		// Frontend Assets
+		$fsAssets = $this->modules->get('InputfieldFieldset');
+		$fsAssets->label = 'Frontend assets';
+		$fsAssets->name  = 'pl_frontend_assets';
+		$fsAssets->collapsed = Inputfield::collapsedNo;
+		
+		$auto = $this->modules->get('InputfieldCheckbox');
+		$auto->name  = 'autoLoadBootstrap';
+		$auto->label = 'Auto-load Bootstrap via CDN if not present';
+		$auto->attr('checked', (bool)$this->get('autoLoadBootstrap'));
+		$auto->notes = 'If your theme does not include Bootstrap 5, the module can inject CDN links.';
+		$fsAssets->add($auto);
+		
+		$css = $this->modules->get('InputfieldText');
+		$css->name  = 'bootstrapCssCdn';
+		$css->label = 'Bootstrap CSS CDN URL';
+		$css->attr('value', (string)$this->get('bootstrapCssCdn'));
+		$css->showIf = 'autoLoadBootstrap=1';
+		$fsAssets->add($css);
+		
+		$js = $this->modules->get('InputfieldText');
+		$js->name  = 'bootstrapJsCdn';
+		$js->label = 'Bootstrap JS (bundle) CDN URL';
+		$js->attr('value', (string)$this->get('bootstrapJsCdn'));
+		$js->showIf = 'autoLoadBootstrap=1';
+		$fsAssets->add($js);
+		
+		$inputfields->add($fsAssets);
+		
 		return $inputfields;
 	}
 }
