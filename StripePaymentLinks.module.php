@@ -1,0 +1,1041 @@
+<?php namespace ProcessWire;
+
+use ProcessWire\Page;
+use ProcessWire\User;
+use ProcessWire\InputfieldWrapper;
+use ProcessWire\WireData;
+use ProcessWire\Module;
+use ProcessWire\ConfigurableModule;
+
+/**
+ * StripePaymentLinks
+ *
+ * Stripe payment-link redirects, purchase mapping, magic-link soft login,
+ * consolidated access emails and Bootstrap modals.
+ *
+ * Split services live in /includes:
+ *  - PLMailService
+ *  - PLModalService
+ *  - PLApiController
+ *
+ * PHP 8+, ProcessWire 3.0.210+
+ */
+class StripePaymentLinks extends WireData implements Module, ConfigurableModule
+{
+	/** Paths */
+	protected string $stripeSdkPath;
+	protected string $moduleMailLayout;
+
+	/** Log channels */
+	private const LOG_PL   = 'stripepaymentlinks';
+	private const LOG_MAIL = 'mail';
+	private const LOG_SEC  = 'security';
+
+	/** Services (lazy) */
+	private ?PLMailService   $mailService  = null;
+	private ?PLModalService  $modalService = null;
+	private ?PLApiController $apiService   = null;
+
+	/**
+	 * Central i18n default texts (key schema: CHANNEL.TYPE.IDENT).
+	 */
+	private function defaultTexts(): array {
+	  return [
+		// ===== MAIL: summary (1..n products) =====
+		'mail.single.subject'        => $this->_('Your access'),
+		'mail.single.preheader'      => $this->_('You now have access to “{title}”.'),
+		'mail.single.body'           => $this->_('You now have access to “{title}”.'),
+		'mail.single.cta'            => $this->_('Start now'),
+		'mail.single.title'          => $this->_(''),
+
+		'mail.multi.subject'         => $this->_('Your accesses'),
+		'mail.multi.preheader'       => $this->_('You unlocked multiple online products: {list}.'),
+		'mail.multi.body'            => $this->_('You unlocked multiple online products: {list}.'),
+		'mail.multi.cta'             => $this->_('Start now'),
+		'mail.multi.title'           => $this->_(''),
+
+		// Common mail elements
+		'mail.common.header_tagline'   => $this->_('Access'),
+		'mail.common.info_label'       => $this->_('Online product'),
+		'mail.common.extra_heading'    => $this->_('Your other access links'),
+		'mail.common.closing_text'     => $this->_('Enjoy!'),
+		'mail.common.footer_note'      => $this->_('This email was sent automatically.'),
+		'mail.common.product_fallback' => $this->_('Product'),
+		'mail.common.direct_link' 	   => $this->_('Direct link'),
+
+		// ===== MAIL: password reset =====
+		'mail.resetpwd.subject'      => $this->_('Reset your password'),
+		'mail.resetpwd.preheader'    => $this->_('Click the button to set a new password. The link is time-limited.'),
+		'mail.resetpwd.body'         => $this->_('You requested a password reset. Click the button to set a new password.'),
+		'mail.resetpwd.cta'          => $this->_('Set new password'),
+		'mail.resetpwd.title'        => $this->_('Reset password'),
+		'mail.resetpwd.notice' 		 => $this->_('If you did not request a password reset, just ignore this email.'),
+
+		// ===== MODAL: notices =====
+		'modal.loginrequired.title'  => $this->_('Sign in'),
+		'modal.loginrequired.body'   => $this->_('Please sign in to open this online product.'),
+		'modal.expiredaccess.title'  => $this->_('Link expired'),
+		'modal.expiredaccess.body'   => $this->_('Your access link is invalid or expired. Please sign in or request a new password-reset link.'),
+
+		// ===== MODAL: login =====
+		'modal.login.title'          => $this->_('I already have access'),
+		'modal.login.body'           => $this->_(''),
+		'modal.login.submit'         => $this->_('Sign in'),
+		'modal.login.forgot_link'    => $this->_('Forgot password?'),
+		'modal.login.open'           => $this->_('Sign in'),
+
+		// ===== MODAL: request reset =====
+		'modal.resetreq.title'       => $this->_('Reset password'),
+		'modal.resetreq.body'        => $this->_('Enter your email — we’ll send you a link.'),
+		'modal.resetreq.submit'      => $this->_('Send link'),
+
+		// ===== MODAL: reset =====
+		'modal.resetexpired.title'   => $this->_('Reset link expired'),
+		'modal.resetexpired.body'    => $this->_('Your password reset link is invalid or has expired. You can request a new one.'),
+		'modal.resetexpired.request' => $this->_('Request new link'),
+		
+		// ===== MODAL: set new password via reset link =====
+		'modal.resetset.title'       => $this->_('Choose a new password'),
+		'modal.resetset.body'        => $this->_('Please set your new password now.'),
+		'modal.resetset.submit'      => $this->_('Save'),
+
+		// ===== MODAL: set password directly after purchase =====
+		'modal.setpwd.title'         => $this->_('Welcome!'),
+		'modal.setpwd.intro'         => $this->_('Hi {firstname}, please set your personal password now. Afterwards you can sign in anytime using {email}.'),
+		'modal.setpwd.btn_submit'    => $this->_('Save'),
+
+		// ===== MODAL: duplicate purchase notice =====
+		'modal.already_purchased.title' => $this->_('Already purchased'),
+		'modal.already_purchased.body'  => $this->_('You already own this product. You can use your existing access.'),
+		
+		// ===== MODAL: shared labels/buttons =====
+		'modal.common.label_password'         => $this->_('Password'),
+		'modal.common.label_password_confirm' => $this->_('Confirm password'),
+		'modal.common.label_email'            => $this->_('Email'),
+		'modal.notice.close'                  => $this->_('Close'),
+		'modal.notice.cancel'                 => $this->_('Cancel'),
+		'modal.notice.title'                  => $this->_('Notice'),
+		'modal.notice.ok'                     => $this->_('OK'),
+
+		// ===== UI (thank-you page access block) =====
+		'ui.access.single_hint'     => $this->_('Here is your additional purchased product'),
+		'ui.access.multi_hint'      => $this->_('Here are your additional purchased products'),
+
+		// ===== API/JSON responses =====
+		'api.method_not_allowed'    => $this->_('Method not allowed'),
+		'api.csrf_invalid'          => $this->_('Invalid CSRF'),
+		'api.unknown_action'        => $this->_('Unknown action'),
+
+		'api.login.missing_fields'  => $this->_('Please enter email and password.'),
+		'api.login.invalid'         => $this->_('Email or password is incorrect.'),
+		'api.login.success'         => $this->_('Signed in successfully.'),
+
+		'api.setpwd.not_logged_in'  => $this->_('Not signed in.'),
+		'api.setpwd.already_set'    => $this->_('Password was already set.'),
+		'api.password.too_short'    => $this->_('At least 8 characters.'),
+		'api.password.mismatch'     => $this->_('Passwords do not match.'),
+		'api.server_error'          => $this->_('Server error.'),
+
+		'api.resetreq.ok_generic'   => $this->_('If the email exists, a link has been sent.'),
+		'api.resetreq.not_config'   => $this->_('Password reset is not configured on the server (fields missing).'),
+
+		'api.resetpwd.token_missing'=> $this->_('Token missing.'),
+		'api.resetpwd.token_invalid'=> $this->_('Token invalid or expired.'),
+		'api.resetpwd.success'      => $this->_('Password updated.'),
+
+		// ===== JS/AJAX error texts =====
+		'ui.ajax.error_generic'     => $this->_('Error'),
+		'ui.ajax.error_server'      => $this->_('Server error.'),
+	  ];
+	}
+
+	public static function getModuleInfo(): array
+	{
+		return [
+			'title'       => 'StripePaymentLinks',
+			'version'     => '1.0.0', 
+			'summary'     => 'Stripe payment-link redirects, user/purchases, magic link, mails, modals.',
+			'author'      => 'frameless Media',
+			'autoload'    => true,
+			'singular'    => true,
+			'icon'        => 'credit-card',
+			'requires'    => ['PHP>=8.0', 'ProcessWire>=3.0.210'],
+		];
+	}
+
+	/* ========================= Lifecycle ========================= */
+
+	/** @inheritDoc */
+	public function init(): void
+	{
+		$this->stripeSdkPath    = __DIR__ . '/vendor/stripe-php/init.php';
+		$this->moduleMailLayout = __DIR__ . '/includes/mail/layout.html.php';
+		if (!is_file($this->moduleMailLayout)) {
+			$this->wire('log')->save(self::LOG_MAIL, 'layout.html.php missing in module (includes/mail); using minimal HTML fallback.');
+		}
+
+		$this->addHook('/stripepaymentlinks/api', function($event) {
+			$this->api()->handle($event);
+		});
+
+		$this->addHookAfter('Modules::saveConfig', function($e){
+			$m    = $e->arguments(0);
+			$data = (array) $e->arguments(1);
+			$name = $m instanceof \ProcessWire\Module ? $m->className() : (string) $m;
+			if ($name !== 'StripePaymentLinks') return;
+
+			$this->ensureFields();
+			$this->ensureProductFields($data['productTemplateNames'] ?? null);
+			$this->ensureCustomerRoleExists();
+		});
+	}
+
+	public function ___install(): void {
+		$this->ensureFields();
+		$this->ensureProductFields();
+		$this->ensureCustomerRoleExists();
+	}
+
+	public function ___upgrade($fromVersion, $toVersion): void {
+		$this->ensureFields();
+		$this->ensureProductFields();
+		$this->ensureCustomerRoleExists();
+	}
+	public function ___uninstall(): void
+	{
+		$fields     = $this->wire('fields');
+		$templates  = $this->wire('templates');
+		$roles      = $this->wire('roles');
+		$users      = $this->wire('users');
+		$log        = $this->wire('log');
+		$config     = $this->wire('config');
+	
+		// --- sets we manage ---
+		$userFieldNames = [
+			'must_set_password',
+			'access_token',
+			'access_expires',
+			'reset_token',
+			'reset_expires',
+			'purchases', // Repeater
+		];
+		$repeaterInnerNames = [
+			'product_id',
+			'purchase_date',
+		];
+		$productFieldNames = [
+			'allow_multiple_purchases',
+			'requires_access',
+			'stripe_product_id',
+		];
+	
+		// --- helper: field usage across all templates ---
+		$isFieldInUse = function(\ProcessWire\Field $f) use ($templates): bool {
+			foreach ($templates as $t) {
+				/** @var \ProcessWire\Template $t */
+				if ($t->fieldgroup && $t->fieldgroup->has($f)) return true;
+			}
+			return false;
+		};
+	
+		// --- helper: remove field from a template (and context) if present ---
+		$detachFieldFromTemplate = function(string $tplName, \ProcessWire\Field $f) use ($templates, $fields) {
+			/** @var \ProcessWire\Template|null $tpl */
+			$tpl = $templates->get($tplName);
+			if (!$tpl || !$tpl->id) return;
+			$fg = $tpl->fieldgroup;
+			if ($fg->has($f)) {
+				// remove context first (if any)
+				$ctx = $fg->getField($f, true);
+				if ($ctx) {
+					try { $fields->deleteFieldgroupContext($ctx, $fg); } catch (\Throwable $e) {}
+				}
+				$fg->remove($f);
+				try { $fg->save(); } catch (\Throwable $e) {}
+			}
+		};
+	
+		// 1) Detach from user template
+		/** @var \ProcessWire\Template|null $userTpl */
+		$userTpl = $templates->get('user');
+		if ($userTpl && $userTpl->id) {
+			foreach ($userFieldNames as $fname) {
+				if (!($f = $fields->get($fname)) || !$f->id) continue;
+				$detachFieldFromTemplate('user', $f);
+			}
+		}
+	
+		// 2) Detach from product templates (module config)
+		$tplNames = array_values(array_unique(array_filter((array)($this->productTemplateNames ?? []))));
+		foreach ($tplNames as $tplName) {
+			foreach ($productFieldNames as $fname) {
+				if (!($f = $fields->get($fname)) || !$f->id) continue;
+				$detachFieldFromTemplate($tplName, $f);
+			}
+		}
+	
+		// 3) Delete role "customer"
+		try {
+			$role = $roles->get('customer');
+			if ($role && $role->id) {
+				// remove from all users
+				foreach ($users as $u) {
+					/** @var \ProcessWire\User $u */
+					if ($u->hasRole($role)) {
+						$u->of(false);
+						$u->roles->remove($role);
+						try { $users->save($u, ['quiet' => true]); } catch (\Throwable $e) {}
+					}
+				}
+				// delete role
+				try { $roles->delete($role); } catch (\Throwable $e) {}
+			}
+		} catch (\Throwable $e) {}
+	
+		// 4) Delete fields (only if not used elsewhere)
+		// 4a) Delete repeater (this will also remove its repeater template/items)
+		if (($purchases = $fields->get('purchases')) && $purchases->id) {
+			// ensure detached from all templates
+			foreach ($templates as $t) {
+				/** @var \ProcessWire\Template $t */
+				if ($t->fieldgroup && $t->fieldgroup->has($purchases)) {
+					$fg = $t->fieldgroup;
+					$fg->remove($purchases);
+					try { $fg->save(); } catch (\Throwable $e) {}
+				}
+			}
+			try { $fields->delete($purchases); } catch (\Throwable $e) {}
+		}
+	
+		// 4b) Delete inner repeater fields if unused
+		foreach ($repeaterInnerNames as $fname) {
+			if (($f = $fields->get($fname)) && $f->id && !$isFieldInUse($f)) {
+				try { $fields->delete($f); } catch (\Throwable $e) {}
+			}
+		}
+	
+		// 4c) Delete user fields if unused
+		foreach (['must_set_password','access_token','access_expires','reset_token','reset_expires'] as $fname) {
+			if (($f = $fields->get($fname)) && $f->id && !$isFieldInUse($f)) {
+				try { $fields->delete($f); } catch (\Throwable $e) {}
+			}
+		}
+	
+		// 4d) Delete product fields if unused
+		foreach ($productFieldNames as $fname) {
+			if (($f = $fields->get($fname)) && $f->id && !$isFieldInUse($f)) {
+				try { $fields->delete($f); } catch (\Throwable $e) {}
+			}
+		}
+	
+		// 5) Delete module-specific logs
+		try {
+			$logsPath = rtrim($config->paths->logs, '/\\');
+
+			$plLog = $logsPath . DIRECTORY_SEPARATOR . self::LOG_PL . '.txt';
+			if (is_file($plLog)) @unlink($plLog);
+			
+			$mailLog = $logsPath . DIRECTORY_SEPARATOR . self::LOG_MAIL . '.txt';
+			if (is_file($mailLog)) @unlink($mailLog);
+			
+			$secLog = $logsPath . DIRECTORY_SEPARATOR . self::LOG_SEC . '.txt';
+			if (is_file($secLog)) @unlink($secLog);
+
+		} catch (\Throwable $e) {}
+	
+		// Done
+	}
+	
+	/* ========================= Public API ========================= */
+
+	public function render(Page $currentPage): string{
+		$this->processCheckout($currentPage);
+		$this->handleAccessParam();
+	
+		$u       = $this->wire('user');
+		$session = $this->wire('session');
+		$input   = $this->wire('input');
+		$pages   = $this->wire('pages');
+	
+		$queuedNotice    = $session->get('modal_notice');
+		$hasQueuedNotice = is_array($queuedNotice) && !empty($queuedNotice['id'] ?? '');
+		$out = '';
+	
+		// Is this page a delivery/product page? (only those should hide the button block)
+		$isAccessPage = $this->productRequiresAccess($currentPage) === true;
+	
+		// 1) Gate product/delivery pages that require access
+		if ($isAccessPage) {
+			$hasAccess = $u->isSuperuser()
+				|| ($u->isLoggedin() && $this->hasPurchasedProduct($u, $currentPage));
+	
+			if (!$hasAccess) {
+				$sales = $currentPage->parent();
+				if ($sales && $sales->id) {
+					$session->set('pl_intended_url', $currentPage->httpUrl);
+					$this->modal()->queueLoginRequiredModal();
+					$session->redirect($sales->httpUrl, false);
+					return '';
+				}
+			}
+		}
+	
+		// 2) Thank-you button block (only on non-access pages)
+		$links = $session->get('pl_access_links');
+		if (is_array($links) && count($links)) {
+			if (!$isAccessPage) {
+				$out .= $this->modal()->renderAccessButtonsBlock($links);
+			}
+			// always clear after first render/suppress
+			$session->remove('pl_access_links');
+		}
+	
+		// 3) Reset token handling (validate BEFORE rendering reset modal)
+		$resetToken       = $input->get->text('reset');
+		$usernameForReset = '';
+		$shouldOpenReset  = false;
+	
+		if ($resetToken) {
+			$now = time();
+			/** @var \ProcessWire\User|null $uByToken */
+			$uByToken = $this->wire('users')->get("reset_token=$resetToken, reset_expires>=$now");
+			if ($uByToken && $uByToken->id) {
+				// Valid token → prefill username and plan to open reset modal
+				$usernameForReset = (string) $uByToken->email;
+				$shouldOpenReset  = true;
+			} else {
+				// Invalid/expired token → queue friendly modal that offers to request a new one
+				$this->modal()->queueResetTokenExpiredModal([
+					'action'     => $this->apiUrl(),
+					'return_url' => $currentPage->httpUrl,
+				]);
+			}
+		}
+	
+		// 4) Modals (render only what is needed)
+		$out .= $this->modal()->modalLogin([
+			'action'       => $this->apiUrl(),
+			'redirect_url' => $currentPage->url ?: $pages->get('/')->url,
+		]);
+	
+		$out .= $this->modal()->modalResetRequest([
+			'action'     => $this->apiUrl(),
+			'return_url' => $currentPage->httpUrl,
+		]);
+	
+		// Render "set new password" modal only when the token is valid
+		if ($shouldOpenReset) {
+			$out .= $this->modal()->modalResetSet([
+				'action'   => $this->apiUrl(),
+				'username' => $usernameForReset,
+			]);
+	
+			// Inject token + auto-open ONLY for valid token
+			$out .= '<script>
+				document.addEventListener("DOMContentLoaded", function(){
+					var fld = document.getElementById("resetTokenField");
+					if (fld) fld.value = "'. addslashes($resetToken) .'";
+					var m = document.getElementById("resetSetModal");
+					if (m && window.bootstrap) bootstrap.Modal.getOrCreateInstance(m).show();
+				});
+			</script>';
+		}
+	
+		// 5) After purchase: force set-password modal when needed (on access pages)
+		if ($isAccessPage
+			&& $u->isLoggedin()
+			&& $u->hasField('must_set_password') && $u->must_set_password) {
+	
+			$out .= $this->modal()->modalSetPassword([
+				'action'   => $this->apiUrl(),
+				'user'     => $u,
+				'username' => (string) $u->email,
+			]);
+	
+			if (!$hasQueuedNotice) {
+				$out .= '<script>
+					document.addEventListener("DOMContentLoaded", function(){
+						var el = document.getElementById("setPassModal");
+						if (el && window.bootstrap) bootstrap.Modal.getOrCreateInstance(el).show();
+					});
+				</script>';
+			}
+		}
+	
+		// 6) Strip ?access when logged in
+		if ($u->isLoggedin() && $this->wire('input')->get->text('access')) {
+			$out .= '<script>
+				(function(){
+					var url = new URL(window.location.href);
+					if (url.searchParams.has("access")) {
+						url.searchParams.delete("access");
+						window.history.replaceState({}, "", url.pathname + (url.searchParams.toString()? "?"+url.searchParams.toString() : "") + url.hash);
+					}
+				})();
+			</script>';
+		}
+	
+		// 7) One-off notices + global AJAX handler
+		$out .= $this->modal()->renderModalNotice();
+		$out .= $this->modal()->globalAjaxHandlerJs();
+	
+		return $out;
+	}
+						
+	/**
+	 * Process Stripe ?session_id – map purchases, attach to user, park access links, send mail.
+	 */
+public function processCheckout(Page $currentPage): void {
+		 $input     = $this->wire('input');
+		 $session   = $this->wire('session');
+		 $users     = $this->wire('users');
+		 $sanitizer = $this->wire('sanitizer');
+		 $config    = $this->wire('config');
+	 
+		 $sessionId = $input->get->text('session_id');
+		 if (!$sessionId) return;
+	 
+		 // Idempotency per browser session
+		 $processed = $session->get('pl_processed_sessions') ?: [];
+		 if (in_array($sessionId, $processed, true)) return;
+	 
+		 // Stripe SDK
+		 $sdk = $this->stripeSdkPath ?? (__DIR__ . '/vendor/stripe-php/init.php');
+		 if (!is_file($sdk)) { 
+			 $this->wire('log')->save(self::LOG_PL, 'Stripe SDK not found'); 
+			 return; 
+		 }
+		 require_once $sdk;
+	 
+		 $apiKey = (string)($this->stripeApiKey ?? ($config->stripe['api_key'] ?? ''));
+		 if (!$apiKey) { 
+			 $this->wire('log')->save(self::LOG_PL, 'Stripe API key missing.'); 
+			 return; 
+		 }
+	 
+		 try {
+			 \Stripe\Stripe::setApiKey($apiKey);
+	 
+			 $checkoutSession = \Stripe\Checkout\Session::retrieve([
+				 'id'     => $sessionId,
+				 'expand' => ['line_items.data.price.product', 'customer']
+			 ]);
+			 if (($checkoutSession->payment_status ?? null) !== 'paid') return;
+	 
+			 // Buyer data
+			 $email = $checkoutSession->customer_details->email
+				   ?? ($checkoutSession->customer->email ?? null)
+				   ?? $checkoutSession->customer_email
+				   ?? null;
+	 
+			 $fullName = $checkoutSession->customer_details->name
+					  ?? ($checkoutSession->customer->name ?? null)
+					  ?? ($checkoutSession->shipping->name ?? null)
+					  ?? '';
+	 
+			 if (!$email) {
+				 $this->wire('log')->save(self::LOG_PL, 'No email for session '.$sessionId);
+				 return;
+			 }
+	 
+			 // User
+			 $isNewUser = false;
+			 /** @var User $buyer */
+			 $buyer = $users->get("email=" . $sanitizer->email($email));
+			 if (!$buyer || !$buyer->id) {
+				 $isNewUser = true;
+				 $buyer = new User();
+				 $buyer->name  = $sanitizer->pageName($email);
+				 $buyer->email = $email;
+				 $buyer->pass  = bin2hex(random_bytes(8));
+				 $buyer->must_set_password = 1;
+				 if ($fullName) $buyer->title = $fullName;
+				 $users->save($buyer);
+			 } elseif ($fullName && $buyer->title !== $fullName) {
+				 $buyer->of(false);
+				 $buyer->title = $fullName;
+				 $users->save($buyer, ['quiet' => true]);
+			 }
+	 
+			 $this->ensureCustomerRole($buyer);
+	 
+			 // Collect products
+			 $lineItems      = (array)($checkoutSession->line_items->data ?? []);
+			 $accessProducts = [];
+			 $allMapped      = [];
+			 $unmapped       = [];
+			 $alreadyDisallowed = false;
+	 
+			 foreach ($lineItems as $li) {
+				 $label = ($li->price->product->name ?? null)
+					   ?? ($li->description ?? null)
+					   ?? ($li->price->nickname ?? null)
+					   ?? 'unknown item';
+	 
+				 $pwProduct = $this->mapStripeLineItemToProduct($li);
+				 if (!$pwProduct || !$pwProduct->id) { 
+					 $unmapped[] = (string)$label; 
+					 continue; 
+				 }
+	 
+				 $allMapped[$pwProduct->id] = $pwProduct;
+	 
+				 $allowsMultiple = $this->productAllowsMultiple($pwProduct);
+				 $requiresAccess = $this->productRequiresAccess($pwProduct);
+				 $already        = $this->hasPurchasedProduct($buyer, $pwProduct);
+	 
+				 if ($requiresAccess) {
+					 $accessProducts[$pwProduct->id] = $pwProduct;
+				 }
+	 
+				 if ($already && !$allowsMultiple) {
+					 $alreadyDisallowed = true;
+				 }
+			 }
+	 
+			 // Persist single purchase item
+			 if ($buyer->hasField('purchases')) {
+				 $buyer->of(false);
+				 $item = $buyer->purchases->getNew();
+				 $item->set('product_id', 0); // neutral
+				 $item->set('purchase_date', time());
+				 $buyer->purchases->add($item);
+				 $users->save($buyer, ['quiet' => true]);
+	 
+				 try {
+					 $ids = array_keys($allMapped);
+					 $item->meta('product_ids', $ids);
+					 $item->meta('stripe_session',
+						 is_object($checkoutSession) && method_exists($checkoutSession, 'toArray')
+							 ? $checkoutSession->toArray()
+							 : (array)$checkoutSession
+					 );
+					 $item->save();
+				 } catch (\Throwable $e) {
+					 $this->wire('log')->save(self::LOG_PL, 'attach single purchase meta warning: '.$e->getMessage());
+				 }
+			 }
+	 
+			 // Enforce login
+			 if (!$this->wire('user')->isLoggedin() || $this->wire('user')->id !== $buyer->id) {
+				 $this->wire('session')->forceLogin($buyer);
+			 }
+	 
+			 // Prepare access links
+			 $links = [];
+			 $token = null;
+			 if (!empty($accessProducts)) {
+				 foreach ($accessProducts as $p) {
+					 $url = $p->httpUrl;
+					 if ($isNewUser) {
+						 if ($token === null) {
+							 $ttlMinutes = (int)($this->accessTokenTtlMinutes ?: 30);
+							 $token = $this->createAccessToken($buyer, $ttlMinutes * 60);
+						 }
+						 $glue = (strpos($url, '?') === false) ? '?' : '&';
+						 $url .= $glue . 'access=' . urlencode($token);
+					 }
+					 $links[] = ['title' => (string)$p->title, 'url' => $url, 'id' => (int)$p->id];
+				 }
+				 $session->set('pl_access_links', $links);
+			 }
+	 
+			 // Mail
+			 if (!empty($links) && $this->shouldSendAccessMail($isNewUser)) {
+				 $this->mail()->sendAccessSummaryMail($this, $buyer, $links);
+			 }
+	 
+			 // Notice if product already purchased and not allowed multiple
+			 if ($alreadyDisallowed) {
+				 $this->modal()->queueAlreadyPurchasedModal();
+			 }
+	 
+			 $processed[] = $sessionId;
+			 $session->set('pl_processed_sessions', $processed);
+	 
+			 $this->wire('log')->save(
+			   self::LOG_PL,
+			   '[INFO] Processed Stripe session ' .
+			   json_encode([
+				 'session'  => $sessionId,
+				 'email'    => $email,
+				 'mapped'   => count($allMapped),
+				 'access'   => count($accessProducts),
+				 'unmapped' => $unmapped ? implode(', ', $unmapped) : '-',
+				 'newUser'  => $isNewUser ? 'yes' : 'no',
+			   ], JSON_UNESCAPED_SLASHES)
+			 );
+	 
+		 } catch (\Throwable $e) {
+			 $this->wire('log')->save(self::LOG_PL, 'processCheckout error: '.$e->getMessage().' '.$sessionId);
+			 return;
+		 }
+	 }
+
+	/** Handle ?access=… (soft login or notice + security logging) */
+	public function handleAccessParam(): void
+	{
+		$input   = $this->wire('input');
+		$session = $this->wire('session');
+		$users   = $this->wire('users');
+		$user    = $this->wire('user');
+
+		$token = $input->get->text('access');
+		if (!$token) return;
+
+		if ($user->isLoggedin()) return;
+
+		if (strlen($token) < 40) {
+			$this->wire('log')->save(self::LOG_SEC, 'Received obviously invalid access token '.$token);
+			$this->modal()->queueExpiredAccessModal();
+			return;
+		}
+
+		$now = time();
+		/** @var \ProcessWire\User $u */
+		$u = $users->get("access_token=$token, access_expires>=$now");
+		if (!$u || !$u->id) {
+			$this->wire('log')->save(self::LOG_SEC, 'Access token not found or expired '.$token);
+			$this->modal()->queueExpiredAccessModal();
+			return;
+		}
+
+		if (!$user->isLoggedin() || $user->id !== $u->id) {
+			$session->forceLogin($u);
+			$this->wire('log')->save(self::LOG_SEC, 'Soft-login via valid access token '.$u->id);
+		}
+	}
+
+	/* ========================= Text access ========================= */
+
+	/** Decide whether to send access mail after checkout based on policy. */
+	private function shouldSendAccessMail(bool $isNewUser): bool {
+		$policy = (string)($this->accessMailPolicy ?? 'newUsersOnly');
+		return match ($policy) {
+			'never'        => false,
+			'always'       => true,
+			'newUsersOnly' => $isNewUser,
+			default        => $isNewUser,
+		};
+	}
+	
+	/** Return a default text by key (no runtime overrides). */
+	public function t(string $key): string {
+		$D = $this->defaultTexts();
+		return $D[$key] ?? '';
+	}
+
+	/** Mail layout path (site override or module default). */
+	public function mailLayoutPath(): string {
+		$layoutPath = (string)($this->mailTemplatePath ?? '');
+		if ($layoutPath && is_file($layoutPath)) return $layoutPath;
+		return $this->moduleMailLayout;
+	}
+
+	/** API URL (absolute). */
+	public function apiUrl(): string {
+		return rtrim($this->wire('config')->urls->root, '/') . '/stripepaymentlinks/api';
+	}
+
+	/* ========================= Services (lazy) ========================= */
+
+	public function mail(): PLMailService {
+		if (!$this->mailService) { require_once __DIR__ . '/includes/PLMailService.php'; $this->mailService = new PLMailService(); }
+		return $this->mailService;
+	}
+	public function modal(): PLModalService {
+		if (!$this->modalService) { require_once __DIR__ . '/includes/PLModalService.php'; $this->modalService = new PLModalService($this); }
+		return $this->modalService;
+	}
+	public function api(): PLApiController {
+		if (!$this->apiService) { require_once __DIR__ . '/includes/PLApiController.php'; $this->apiService = new PLApiController($this); }
+		return $this->apiService;
+	}
+
+	/* ========================= Model/Install helpers ========================= */
+
+	private function mapStripeLineItemToProduct($li): ?\ProcessWire\Page {
+		$pages     = $this->wire('pages');
+		$sanitizer = $this->wire('sanitizer');
+
+		$get = function($src, array $path) {
+			$cur = $src;
+			foreach ($path as $k) {
+				if (is_object($cur)) {
+					$cur = $cur->$k ?? ( ($cur instanceof \ArrayAccess && isset($cur[$k])) ? $cur[$k] : null );
+				} elseif (is_array($cur)) {
+					$cur = array_key_exists($k, $cur) ? $cur[$k] : null;
+				} else return null;
+				if ($cur === null) return null;
+			}
+			return $cur;
+		};
+
+		$stripeProductId = $get($li, ['price','product','id']);
+		if(!$stripeProductId) {
+			$prod = $get($li, ['price','product']);
+			if (is_string($prod) && $prod !== '') $stripeProductId = $prod;
+		}
+
+		$stripeName =
+			$get($li, ['price','product','name']) ??
+			$get($li, ['description']) ??
+			$get($li, ['price','nickname']) ?? '';
+
+		$tplNames = array_values(array_filter(array_map(
+			fn($n) => $sanitizer->name($n),
+			(array)($this->productTemplateNames ?? [])
+		)));
+		$tplSel = $tplNames ? ('template=' . implode('|', $tplNames) . ', ') : '';
+
+		if ($stripeProductId) {
+			$sid = $sanitizer->selectorValue((string)$stripeProductId);
+			$p = $pages->get($tplSel . "stripe_product_id=$sid");
+			if ($p && $p->id) return $p;
+			$p = $pages->get("stripe_product_id=$sid");
+			if ($p && $p->id) return $p;
+		}
+
+		if ($stripeName !== '') {
+			$t = $sanitizer->selectorValue((string)$stripeName);
+			$p = $pages->get($tplSel . "title=$t");
+			if ($p && $p->id) return $p;
+		}
+		return null;
+	}
+
+	protected function ensureFields(): void
+	{
+		$fields    = $this->wire('fields');
+		$templates = $this->wire('templates');
+		$modules   = $this->wire('modules');
+
+		/** @var \ProcessWire\Template|null $userTpl */
+		$userTpl = $templates->get('user');
+		if(!$userTpl || !$userTpl->id) {
+			$this->wire('log')->save(self::LOG_PL, 'ensureFields: user template not found');
+			return;
+		}
+
+		$ensure = function(string $name, string $typeClass, array $props = []) use ($fields, $modules): \ProcessWire\Field {
+			$f = $fields->get($name);
+			if(!$f || !$f->id) {
+				$f = new \ProcessWire\Field();
+				$f->name = $name;
+				$f->type = $modules->get($typeClass);
+			}
+			foreach($props as $k => $v) $f->$k = $v;
+			$fields->save($f);
+			return $f;
+		};
+
+		if(($title = $fields->get('title')) && !$userTpl->fieldgroup->has($title)) {
+			$userTpl->fieldgroup->add($title);
+			$userTpl->fieldgroup->save();
+		}
+
+		$fMust  = $ensure('must_set_password', 'FieldtypeCheckbox', ['label' => 'User must set password']);
+		$fAT    = $ensure('access_token',      'FieldtypeText',     ['label' => 'Access token']);
+		$fATExp = $ensure('access_expires',    'FieldtypeInteger',  ['label' => 'Access token expiry']);
+		$fRT    = $ensure('reset_token',       'FieldtypeText',     ['label' => 'Reset token']);
+		$fRTExp = $ensure('reset_expires',     'FieldtypeInteger',  ['label' => 'Reset expiry']);
+
+		$fg = $userTpl->fieldgroup;
+		$changed = false;
+		foreach([$fMust, $fAT, $fATExp, $fRT, $fRTExp] as $f) {
+			if(!$fg->has($f)) { $fg->add($f); $changed = true; }
+		}
+		if($changed) $fg->save();
+
+		foreach(['must_set_password','access_token','access_expires','reset_token','reset_expires'] as $name) {
+			$base = $fields->get($name);
+			if(!$base || !$fg->has($base)) continue;
+			$ctx = $fg->getField($base, true);
+			$ctx->collapsed = \ProcessWire\Inputfield::collapsedHidden;
+			$fields->saveFieldgroupContext($ctx, $fg);
+		}
+
+		$purchases = $ensure('purchases', 'FieldtypeRepeater', ['label' => 'Purchases']);
+		/** @var \ProcessWire\Template $repTpl */
+		$repTpl = $purchases->type->getRepeaterTemplate($purchases);
+		$repFg  = $repTpl->fieldgroup;
+
+		if(($old = $fields->get('purchase_id')) && $repFg->has($old)) {
+			$repFg->remove($old);
+			$repFg->save();
+		}
+
+		$productId    = $ensure('product_id',    'FieldtypeInteger',  ['label' => 'Product (ID)']);
+		$purchaseDate = $ensure('purchase_date', 'FieldtypeDatetime', ['label' => 'Purchase date']);
+
+		$repChanged = false;
+		foreach([$productId, $purchaseDate] as $f) {
+			if(!$repFg->has($f)) { $repFg->add($f); $repChanged = true; }
+		}
+		if($repChanged) $repFg->save();
+
+		if(!$fg->has($purchases)) {
+			$fg->add($purchases);
+			$fg->save();
+		}
+	}
+
+	protected function ensureProductFields(?array $templateNames = null): void
+	{
+		$fields     = $this->wire('fields');
+		$templates  = $this->wire('templates');
+		$modules    = $this->wire('modules');
+		$sanitizer  = $this->wire('sanitizer');
+
+		$ensure = function(string $name, string $typeClass, string $label = '') use ($fields, $modules): \ProcessWire\Field {
+			$f = $fields->get($name);
+			if(!$f || !$f->id) {
+				$f = new \ProcessWire\Field();
+				$f->name = $name;
+				$f->type = $modules->get($typeClass);
+			}
+			if($label !== '') $f->label = $label;
+			$fields->save($f);
+			return $f;
+		};
+
+		$fAllow  = $ensure('allow_multiple_purchases', 'FieldtypeCheckbox', 'Product: allows multiple purchases');
+		$fReq    = $ensure('requires_access',          'FieldtypeCheckbox', 'Product: requires access/delivery page');
+		$fStripe = $ensure('stripe_product_id',        'FieldtypeText',     'Stripe Product ID');
+
+		if ($templateNames === null) {
+			$templateNames = (array)($this->productTemplateNames ?? []);
+		}
+		$templateNames = array_values(array_unique(array_filter(array_map(
+			fn($n) => $sanitizer->name($n), $templateNames
+		))));
+
+		foreach ($templateNames as $tplName) {
+			$t = $templates->get($tplName);
+			if(!$t || !$t->id) continue;
+
+			$fg = $t->fieldgroup;
+			$changed = false;
+
+			foreach ([$fAllow, $fReq, $fStripe] as $f) {
+				if(!$fg->has($f)) { $fg->add($f); $changed = true; }
+			}
+			if ($changed) $fg->save();
+		}
+	}
+
+	protected function productAllowsMultiple(Page $product): bool {
+		return (bool)($product->get('allow_multiple_purchases') ?? false);
+	}
+	protected function productRequiresAccess(Page $product): bool {
+		return (bool)($product->get('requires_access') ?? false);
+	}
+
+	protected function hasPurchasedProduct(User $user, Page $product): bool{
+		if (!$user->hasField('purchases') || !$user->purchases->count()) return false;
+		$targetId = (int) $product->id;
+	
+		foreach ($user->purchases as $p) {
+			// NEU: moderne Speicherung – mehrere Produkt-IDs im Meta
+			try {
+				$ids = $p->meta('product_ids');
+				if (is_array($ids) && in_array($targetId, array_map('intval', $ids), true)) {
+					return true;
+				}
+			} catch (\Throwable $e) {
+				/* ignore */
+			}
+	
+			// Fallback für Altbestände: einzelnes product_id Feld
+			$pid = (int) ($p->get('product_id') ?? 0);
+			if ($pid === $targetId) return true;
+	
+			// ganz alter Fallback: purchase_id Page-Referenz
+			if ($p->hasField('purchase_id')) {
+				$old   = $p->get('purchase_id');
+				$oldId = $old instanceof \ProcessWire\Page ? (int)$old->id : (int)$old;
+				if ($oldId === $targetId) return true;
+			}
+		}
+		return false;
+	}
+
+	protected function attachPurchase(User $user, Page $product, $checkoutSession): void
+	{
+		if (!$user->hasField('purchases')) return;
+
+		$user->of(false);
+		$item = $user->purchases->getNew();
+		$item->set('product_id', (int)$product->id);
+		$item->set('purchase_date', time());
+
+		$user->purchases->add($item);
+		$this->wire('users')->save($user, ['quiet' => true]);
+
+		try {
+			$item->meta('stripe_session',
+				is_object($checkoutSession) && method_exists($checkoutSession, 'toArray')
+					? $checkoutSession->toArray()
+					: (array)$checkoutSession
+			);
+			$item->save();
+		} catch (\Throwable $e) {
+			$this->wire('log')->save(self::LOG_PL, 'attachPurchase meta warning: '.$e->getMessage());
+		}
+	}
+
+	protected function ensureCustomerRoleExists(): void
+	{
+		$roles       = $this->wire('roles');
+		$permissions = $this->wire('permissions');
+
+		$role = $roles->get('customer');
+		if ($role && $role->id) return;
+
+		try {
+			$role = $roles->add('customer');
+			if (!$role || !$role->id) throw new \Exception('roles->add("customer") failed');
+
+			$view = $permissions->get('page-view');
+			if ($view && !$role->hasPermission($view)) {
+				$role->addPermission($view);
+				$roles->save($role);
+			}
+			$this->wire('log')->save(self::LOG_PL, 'Created role "customer".');
+		} catch (\Throwable $e) {
+			$this->wire('log')->save(self::LOG_PL, 'ensureCustomerRoleExists error: '.$e->getMessage());
+		}
+	}
+
+	protected function ensureCustomerRole(User $user): void
+	{
+		$roles = $this->wire('roles');
+		$users = $this->wire('users');
+
+		try {
+			$role = $roles->get('customer');
+			if (!$role || !$role->id) {
+				$this->wire('log')->save(self::LOG_PL, 'Role "customer" missing. Save module config as superuser to create it.');
+				return;
+			}
+			if (!$user->hasRole($role)) {
+				$user->of(false);
+				$user->roles->add($role);
+				$users->save($user, ['quiet' => true]);
+				$this->wire('log')->save(self::LOG_PL, "Added role 'customer' to user ".$user->id);
+			}
+		} catch (\Throwable $e) {
+			$this->wire('log')->save(self::LOG_PL, 'ensureCustomerRole error: '.$e->getMessage());
+		}
+	}
+
+	protected function createAccessToken(User $user, int $ttlSeconds): string
+	{
+		$token = bin2hex(random_bytes(32));
+		$user->of(false);
+		if ($user->hasField('access_token'))   $user->access_token   = $token;
+		if ($user->hasField('access_expires')) $user->access_expires = time() + max(60, $ttlSeconds);
+		$this->wire('users')->save($user, ['quiet' => true]);
+		return $token;
+	}
+}
