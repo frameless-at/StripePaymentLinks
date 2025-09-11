@@ -64,53 +64,76 @@ The module is designed for small e-commerce or membership scenarios where a full
 2. In the ProcessWire admin, go to **Modules > Refresh**.  
 3. Install **StripePaymentLinks**.  
 4. Enter your **Stripe Secret API Key** in the module config.  
-5. Select which templates represent products.  
+5. Select which templates represent products.
 
 ---
 
 ## Usage
 
 1. In Stripe, create a **Payment Link** and set its **success URL** to your ProcessWire thank-you page, e.g.:
-	https://example.com/thank-you/?session_id={CHECKOUT_SESSION_ID}
-2. On the thank-you page, call the module’s render method in your template:
-	```php
-	echo $modules->get('StripePaymentLinks')->render($page);```
-	
-	•	If the checkout contains access products, the module displays an access buttons block.
-	•	For delivery pages that require access, users are gated and redirected to login if needed.
-	
-		3.	Emails are sent automatically based on config (never | newUsersOnly | always).
-	
-	⸻
-	
-	Configuration
-		•	Stripe Secret API Key
-		•	Product templates (to enable requires_access / allow_multiple_purchases flags)
-		•	Access mail policy (never, newUsersOnly, always)
-		•	Magic link TTL in minutes
-		•	Mail branding (logo, color, from name, signature, etc.)
-	
-	⸻
-	
-	Developer Notes
-		•	Purchases are stored as one repeater item per checkout.
-		•	All purchased product IDs are stored in meta('product_ids').
-		•	Session meta (Stripe Checkout session) is stored in meta('stripe_session').
-		•	Access control uses hasPurchasedProduct($user, $product).
-		•	Modals are rendered via ModalRenderer.php with a clean Bootstrap view.
-		•	Texts are centralized in defaultTexts() and must be accessed with mt() / t().
-	
-	⸻
-	
-	Roadmap
-		•	Optional framework support (UIkit / Tailwind) via JSON view mappings
-		•	Add more payment providers (Mollie, PayPal, …)
-		•	Frontend delivery templates for different product types
-	
-	⸻
-	
-	License
-	
-	MIT License.
-	Copyright © 2025 frameless Media KG
-	
+
+   ```
+   https://example.com/thank-you/?session_id={CHECKOUT_SESSION_ID}
+   ```
+
+2. In ProcessWire templates, call the module’s render method:
+
+   ```php
+   echo $modules->get('StripePaymentLinks')->render($page);
+   ```
+
+  - On the thank-you page, the module will display an access buttons block if the checkout contained products that require access.
+   - On delivery/product pages marked with requires_access, users are gated: if they are not logged in or have not purchased, they are redirected to the sales page and prompted to log in.
+   - After first purchase, new users will see the set-password modal on the delivery page.
+   - Access summary emails are sent automatically according to the configured policy (never, newUsersOnly, or always).
+
+
+---
+
+## Configuration
+
+- **Stripe Secret API Key**
+- **Product templates** (to enable `requires_access` / `allow_multiple_purchases` flags)
+- **Access mail policy** (`never`, `newUsersOnly`, `always`)
+- **Magic link TTL in minutes**
+- **Mail branding** (logo, color, from name, signature, etc.)
+---
+
+## Optional: Bootstrap via CDN
+
+The module’s modal dialogs and access UI are styled with **Bootstrap 5**.  
+If your site does not already include Bootstrap, you have two options:
+
+1. **Automatic inclusion (recommended for quick setup)**  
+   In the module configuration, enable **“Load Bootstrap 5 from CDN”**. The module will then insert css and js assets automatically into your frontend
+
+This ensures the module’s modals, buttons, and notices render correctly, even if your site does not already use Bootstrap.
+
+2.	**Manual inclusion**
+  If your frontend already includes Bootstrap (from your theme or build pipeline), you can leave the config option disabled. No additional assets will be injected, avoiding duplicates.
+
+---
+
+## Developer Notes
+
+- Purchases are stored as one repeater item per checkout.
+- All purchased product IDs are stored in `meta('product_ids')`.
+- Session meta (Stripe Checkout session) is stored in `meta('stripe_session')`.
+- Access control uses `hasPurchasedProduct($user, $product)`.
+- Modals are rendered via `ModalRenderer.php` with a clean Bootstrap view.
+- Texts are centralized in `defaultTexts()` and must be accessed with `mt()` / `t()`.
+
+---
+
+## Roadmap
+
+- Optional framework support (UIkit / Tailwind) via JSON view mappings
+- Add more payment providers (Mollie, PayPal, …)
+- Frontend delivery templates for different product types
+
+---
+
+## License
+
+MIT License.  
+Copyright © 2025 frameless Media KG
