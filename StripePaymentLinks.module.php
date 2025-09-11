@@ -184,6 +184,13 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			$this->wire('log')->save(self::LOG_MAIL, 'layout.html.php missing in module (includes/mail); using minimal HTML fallback.');
 		}
 
+		// Inject Bootstrap (CSS/JS) early into <head> to avoid FOUC
+		$this->addHookAfter('Page::render', function(\ProcessWire\HookEvent $e) {
+			$html = (string)$e->return;
+			$e->return = $this->renderBootstrapFallback($html);
+		});
+
+
 		$this->addHook('/stripepaymentlinks/api', function($event) {
 			$this->api()->handle($event);
 		});
@@ -513,9 +520,6 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		// 7) One-off notices + global AJAX handler
 		$out .= $this->modal()->renderModalNotice();
 		$out .= $this->modal()->globalAjaxHandlerJs();
-		
-		// 8) Auto-load Bootstrap via CDN if enabled and not present
-		$out .= $this->renderBootstrapFallback();
 		
 		return $out;
 	}
@@ -1025,46 +1029,55 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	private function jsq(string $s): string {
 		return json_encode($s, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 	}
-	
-	/** Render a CDN-based Bootstrap loader if Bootstrap is not present. */
-	private function renderBootstrapFallback(): string
+	/** Heuristics: detect if Bootstrap is already present (CSS or window.bootstrap marker later) */
+	private function detectBootstrapPresent(string $html): bool
 	{
-		// Respect config toggle
-		if (!(bool)($this->autoLoadBootstrap ?? false)) return '';
+		// quick CSS detection in head/body
+		if (preg_match('~href=["\']?[^"\']*bootstrap(\.min)?\.css~i', $html)) return true;
+		// if you also enqueue via $config->styles elsewhere, the above still catches it
+		return false;
+	}
+	/** Inject $tags into <head> once, robust to casing/attributes and missing </head>. */
+	private function injectIntoHead(string $html, string $tags): string {
+		if ($tags === '') return $html;
 	
-		$css = (string)($this->bootstrapCssCdn ?? 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css');
-		$js  = (string)($this->bootstrapJsCdn  ?? 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js');
+		// Avoid duplicate injection if our marker is already present
+		if (stripos($html, 'id="spl-bootstrap-css"') !== false || stripos($html, 'id="spl-bootstrap-js"') !== false) {
+			return $html;
+		}
+
+		// Fallback: direkt hinter das öffnende <head ...>
+		if (preg_match('/<head\b[^>]*>/i', $html)) {
+			return preg_replace('/<head\b[^>]*>/i', '$0' . "\n" . $tags, $html, 1);
+		}
 	
-		$cssJson = $this->jsq($css);
-		$jsJson  = $this->jsq($js);
-	
-		return <<<HTML
-	<script>
-	(function(){
-	  // Avoid duplicate injection
-	  if (window.bootstrap || document.getElementById('spl-bootstrap-js')) return;
-	
-	  function inject(tag, attrs){
-		var el = document.createElement(tag);
-		for (var k in attrs) el.setAttribute(k, attrs[k]);
-		(document.head || document.documentElement).appendChild(el);
-		return el;
-	  }
-	
-	  // Inject CSS if not already present
-	  var haveCss = Array.prototype.some.call(document.styleSheets || [], function(ss){
-		try { return (ss.href || '').indexOf('/bootstrap') !== -1 || (ss.ownerNode && ss.ownerNode.id === 'spl-bootstrap-css'); }
-		catch(e){ return false; }
-	  });
-	  if (!haveCss) {
-		inject('link', { id: 'spl-bootstrap-css', rel: 'stylesheet', href: {$cssJson}, crossorigin: 'anonymous' });
-	  }
-	
-	  // Inject JS bundle (with Popper)
-	  inject('script', { id: 'spl-bootstrap-js', src: {$jsJson}, async: true, defer: true, crossorigin: 'anonymous' });
-	})();
-	</script>
-	HTML;
+		// Letzter Fallback: ganz an den Anfang
+		return $tags . "\n" . $html;
+	}
+	/** Render a CDN-based Bootstrap loader if Bootstrap is not present. */
+		private function renderBootstrapFallback(string $html): string {
+
+		// Config: enable/disable CDN autoload
+		if (!(bool)($this->autoLoadBootstrap ?? false)) return $html;
+		
+		// If <head> is missing or already has bootstrap CSS, do nothing
+		if (stripos($html, '<head>') === false) return $html;
+		if ($this->detectBootstrapPresent($html)) return $html;
+		
+		// Resolve CDN URLs (use config or fallbacks)
+		$css = trim((string)($this->bootstrapCssCdn ?? ''));
+		$js  = trim((string)($this->bootstrapJsCdn  ?? ''));
+		if ($css === '') $css = 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css';
+		if ($js  === '') $js  = 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js';
+		
+		// Synchronous stylesheet in <head> to prevent FOUC (no async preload here)
+		$tags  = "\n<!-- StripePaymentLinks: Bootstrap CDN -->\n";
+		$tags .= '<link id="spl-bootstrap-css" rel="stylesheet" href="' . htmlspecialchars($css, ENT_QUOTES, 'UTF-8') . "\" crossorigin=\"anonymous\">\n";
+		// JS can be deferred; CSS is what prevents FOUC
+		$tags .= '<script id="spl-bootstrap-js" src="' . htmlspecialchars($js, ENT_QUOTES, 'UTF-8') . "\" defer crossorigin=\"anonymous\"></script>\n";
+		
+		// Inject right before </head>
+		return $this->injectIntoHead($html, $tags);
 	}
 	
 	/**
