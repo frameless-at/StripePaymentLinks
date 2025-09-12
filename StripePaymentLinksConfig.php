@@ -193,6 +193,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		$css->name  = 'bootstrapCssCdn';
 		$css->label = 'Bootstrap CSS CDN URL';
 		$css->attr('value', (string)$this->get('bootstrapCssCdn'));
+		$css->notes = 'If empty css version 5.3.3 from jsdelivr.net is added.';
 		$css->showIf = 'autoLoadBootstrap=1';
 		$fsAssets->add($css);
 		
@@ -200,6 +201,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		$js->name  = 'bootstrapJsCdn';
 		$js->label = 'Bootstrap JS (bundle) CDN URL';
 		$js->attr('value', (string)$this->get('bootstrapJsCdn'));
+		$js->notes = 'If empty js version 5.3.3 from jsdelivr.net is added.';
 		$js->showIf = 'autoLoadBootstrap=1';
 		$fsAssets->add($js);
 		
