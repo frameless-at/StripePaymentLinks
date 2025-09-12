@@ -643,7 +643,6 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			 if ($buyer->hasField('purchases')) {
 				 $buyer->of(false);
 				 $item = $buyer->purchases->getNew();
-				 $item->set('product_id', 0); // neutral
 				 $item->set('purchase_date', time());
 				 $buyer->purchases->add($item);
 				 $users->save($buyer, ['quiet' => true]);
@@ -956,20 +955,13 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		$repTpl = $purchases->type->getRepeaterTemplate($purchases);
 		$repFg  = $repTpl->fieldgroup;
 
-		if(($old = $fields->get('purchase_id')) && $repFg->has($old)) {
-			$repFg->remove($old);
-			$repFg->save();
-		}
-
-		$productId    = $ensure('product_id',    'FieldtypeInteger',  ['label' => 'Product (ID)']);
 		$purchaseDate = $ensure('purchase_date', 'FieldtypeDatetime', ['label' => 'Purchase date']);
 
-		$repChanged = false;
-		foreach([$productId, $purchaseDate] as $f) {
-			if(!$repFg->has($f)) { $repFg->add($f); $repChanged = true; }
+		if(!$repFg->has($purchaseDate)) {
+			$repFg->add($purchaseDate);
+			$repFg->save();
 		}
-		if($repChanged) $repFg->save();
-
+		
 		if(!$fg->has($purchases)) {
 			$fg->add($purchases);
 			$fg->save();
@@ -1046,37 +1038,41 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			return $html;
 		}
 
-		// Fallback: direkt hinter das öffnende <head ...>
 		if (preg_match('/<head\b[^>]*>/i', $html)) {
 			return preg_replace('/<head\b[^>]*>/i', '$0' . "\n" . $tags, $html, 1);
 		}
 	
-		// Letzter Fallback: ganz an den Anfang
 		return $tags . "\n" . $html;
 	}
-	/** Render a CDN-based Bootstrap loader if Bootstrap is not present. */
-		private function renderBootstrapFallback(string $html): string {
-
-		// Config: enable/disable CDN autoload
+	
+	/** Inject Bootstrap (CSS/JS) only on frontend pages (never in PW admin). */
+	private function renderBootstrapFallback(string $html): string
+	{
 		if (!(bool)($this->autoLoadBootstrap ?? false)) return $html;
-		
-		// If <head> is missing or already has bootstrap CSS, do nothing
+	
+		$page   = $this->wire('page');
+		$input  = $this->wire('input');
+		$config = $this->wire('config');
+	
+		if (
+			($page && (string)$page->template === 'admin') ||
+			(isset($config->urls->admin) && strpos((string)$input->url, (string)$config->urls->admin) === 0)
+		) {
+			return $html;
+		}
+	
 		if (stripos($html, '<head>') === false) return $html;
 		if ($this->detectBootstrapPresent($html)) return $html;
-		
-		// Resolve CDN URLs (use config or fallbacks)
+	
 		$css = trim((string)($this->bootstrapCssCdn ?? ''));
 		$js  = trim((string)($this->bootstrapJsCdn  ?? ''));
 		if ($css === '') $css = 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css';
 		if ($js  === '') $js  = 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js';
-		
-		// Synchronous stylesheet in <head> to prevent FOUC (no async preload here)
-		$tags  = "\n<!-- StripePaymentLinks: Bootstrap CDN -->\n";
+	
+		$tags  = "\n<!-- StripePaymentLinks: Bootstrap CDN (frontend only) -->\n";
 		$tags .= '<link id="spl-bootstrap-css" rel="stylesheet" href="' . htmlspecialchars($css, ENT_QUOTES, 'UTF-8') . "\" crossorigin=\"anonymous\">\n";
-		// JS can be deferred; CSS is what prevents FOUC
 		$tags .= '<script id="spl-bootstrap-js" src="' . htmlspecialchars($js, ENT_QUOTES, 'UTF-8') . "\" defer crossorigin=\"anonymous\"></script>\n";
-		
-		// Inject right before </head>
+	
 		return $this->injectIntoHead($html, $tags);
 	}
 	
@@ -1112,25 +1108,12 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		$targetId = (int) $product->id;
 	
 		foreach ($user->purchases as $p) {
-			// NEU: moderne Speicherung – mehrere Produkt-IDs im Meta
 			try {
 				$ids = $p->meta('product_ids');
 				if (is_array($ids) && in_array($targetId, array_map('intval', $ids), true)) {
 					return true;
 				}
 			} catch (\Throwable $e) {
-				/* ignore */
-			}
-	
-			// Fallback für Altbestände: einzelnes product_id Feld
-			$pid = (int) ($p->get('product_id') ?? 0);
-			if ($pid === $targetId) return true;
-	
-			// ganz alter Fallback: purchase_id Page-Referenz
-			if ($p->hasField('purchase_id')) {
-				$old   = $p->get('purchase_id');
-				$oldId = $old instanceof \ProcessWire\Page ? (int)$old->id : (int)$old;
-				if ($oldId === $targetId) return true;
 			}
 		}
 		return false;
@@ -1149,7 +1132,6 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 
 		$user->of(false);
 		$item = $user->purchases->getNew();
-		$item->set('product_id', (int)$product->id);
 		$item->set('purchase_date', time());
 
 		$user->purchases->add($item);
