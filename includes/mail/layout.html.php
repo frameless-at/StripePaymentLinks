@@ -52,7 +52,6 @@ $showInfo = $has('productUrl') || $has('infoLabel') || $has('closingText') || $h
   <style>
 	@media (max-width: 600px){
 	  .wrapper{ padding:12px !important; }
-	  .card   { border-radius:10px !important; }
 	  .h1     { font-size:20px !important; }
 	  .lead   { font-size:16px !important; }
 	  .btn    { width:100% !important; display:block !important; }
@@ -70,7 +69,7 @@ $showInfo = $has('productUrl') || $has('infoLabel') || $has('closingText') || $h
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#eee;border-collapse:collapse;">
 	<tr>
 	  <td align="center" class="wrapper" style="padding:20px;">
-		<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;">
+		<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;background:#ffffff;border-radius:8px;overflow:hidden;">
 
 		  <!-- Header -->
 		  <tr>
