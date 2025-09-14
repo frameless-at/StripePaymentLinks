@@ -1,6 +1,6 @@
 # StripePaymentLinks
 
-Lightweight ProcessWire module to handle [Stripe Checkout Payment Links](https://stripe.com/docs/payments/checkout/payment-links).  
+Lightweight ProcessWire module to handle [Stripe Checkout Payment Links](https://docs.stripe.com/payments/no-code).  
 It takes care of:
 
 - Handling the **Stripe redirect (success URL)**  
