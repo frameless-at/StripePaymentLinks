@@ -22,6 +22,25 @@ use ProcessWire\ConfigurableModule;
  */
  
 class StripePaymentLinks extends WireData implements Module, ConfigurableModule {
+
+	/**
+ 	* Returns ProcessWire module info array.
+ 	*
+ 	* @return array Module metadata for ProcessWire.
+ 	*/
+	public static function getModuleInfo(): array {
+		return [
+			'title'       => 'StripePaymentLinks',
+			'version'     => '1.0.1', 
+			'summary'     => 'Stripe payment-link redirects, user/purchases, magic link, mails, modals.',
+			'author'      => 'frameless Media',
+			'autoload'    => true,
+			'singular'    => true,
+			'icon'        => 'credit-card',
+			'requires'    => ['PHP>=8.0', 'ProcessWire>=3.0.210'],
+		];
+	}
+
 	/** Paths */
 	protected string $stripeSdkPath;
 	protected string $moduleMailLayout;
@@ -151,24 +170,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		'ui.ajax.error_server'      => $this->_('Server error.'),
 	  ];
 	}
-	
-	/**
-	 * Returns ProcessWire module info array.
-	 *
-	 * @return array Module metadata for ProcessWire.
-	 */
-	public static function getModuleInfo(): array {
-		return [
-			'title'       => 'StripePaymentLinks',
-			'version'     => '1.0.0', 
-			'summary'     => 'Stripe payment-link redirects, user/purchases, magic link, mails, modals.',
-			'author'      => 'frameless Media',
-			'autoload'    => true,
-			'singular'    => true,
-			'icon'        => 'credit-card',
-			'requires'    => ['PHP>=8.0', 'ProcessWire>=3.0.210'],
-		];
-	}
+
 
 	/* ========================= Lifecycle ========================= */
 
@@ -607,6 +609,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	 
 			 // Collect products
 			 $lineItems      = (array)($checkoutSession->line_items->data ?? []);
+			 $lines = [];
 			 $accessProducts = [];
 			 $allMapped      = [];
 			 $unmapped       = [];
@@ -629,7 +632,18 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 				 $allowsMultiple = $this->productAllowsMultiple($pwProduct);
 				 $requiresAccess = $this->productRequiresAccess($pwProduct);
 				 $already        = $this->hasPurchasedProduct($buyer, $pwProduct);
-	 
+	 			$pid   = $pwProduct ? (int)$pwProduct->id : 0;
+				 $qty   = max(1, (int)($li->quantity ?? 1));
+				 $title = $pwProduct ? (string)$pwProduct->title
+					 : ( (string)($li->price->product->name ?? $li->description ?? $li->price->nickname ?? 'Item') );
+				 
+				 $cur  = strtoupper((string)($li->currency ?? ($checkoutSession->currency ?? 'EUR')));
+				 $cents = isset($li->amount_total) && is_numeric($li->amount_total)
+					 ? (int)$li->amount_total
+					 : ( (isset($li->price->unit_amount) && is_numeric($li->price->unit_amount)) ? ((int)$li->price->unit_amount) * $qty : 0 );
+				 
+				 $lines[] = $pid . ' • ' . $qty . ' • ' . $title . ' • ' . number_format($cents / 100, 2, '.', '') . ' ' . $cur;
+				 
 				 if ($requiresAccess) {
 					 $accessProducts[$pwProduct->id] = $pwProduct;
 				 }
@@ -644,6 +658,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 				 $buyer->of(false);
 				 $item = $buyer->purchases->getNew();
 				 $item->set('purchase_date', time());
+				 $item->set('purchase_lines', implode("\n", $lines));
 				 $buyer->purchases->add($item);
 				 $users->save($buyer, ['quiet' => true]);
 	 
@@ -956,12 +971,16 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		$repFg  = $repTpl->fieldgroup;
 
 		$purchaseDate = $ensure('purchase_date', 'FieldtypeDatetime', ['label' => 'Purchase date']);
+		$purchaseLines = $ensure('purchase_lines', 'FieldtypeTextarea', [
+			'label' => 'Purchase lines',
+			'notes' => 'One line per line-item: PRODUCT_ID • QTY • PRODUCT_TITLE • TOTAL',
+		]);
+				
+		$repChanged = false;
+			if(!$repFg->has($purchaseDate))  { $repFg->add($purchaseDate);  $repChanged = true; }
+			if(!$repFg->has($purchaseLines)) { $repFg->add($purchaseLines); $repChanged = true; }
+			if($repChanged) $repFg->save();
 
-		if(!$repFg->has($purchaseDate)) {
-			$repFg->add($purchaseDate);
-			$repFg->save();
-		}
-		
 		if(!$fg->has($purchases)) {
 			$fg->add($purchases);
 			$fg->save();
