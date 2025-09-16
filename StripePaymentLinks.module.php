@@ -31,7 +31,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	public static function getModuleInfo(): array {
 		return [
 			'title'       => 'StripePaymentLinks',
-			'version'     => '1.0.1', 
+			'version'     => '1.0.2', 
 			'summary'     => 'Stripe payment-link redirects, user/purchases, magic link, mails, modals.',
 			'author'      => 'frameless Media',
 			'autoload'    => true,
@@ -1004,6 +1004,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			if(!$f || !$f->id) {
 				$f = new \ProcessWire\Field();
 				$f->name = $name;
+				$f->columnWidth = 33;
 				$f->type = $modules->get($typeClass);
 			}
 			if($label !== '') $f->label = $label;
@@ -1011,9 +1012,9 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			return $f;
 		};
 
-		$fAllow  = $ensure('allow_multiple_purchases', 'FieldtypeCheckbox', 'Product: allows multiple purchases');
-		$fReq    = $ensure('requires_access',          'FieldtypeCheckbox', 'Product: requires access/delivery page');
 		$fStripe = $ensure('stripe_product_id',        'FieldtypeText',     'Stripe Product ID');
+		$fReq    = $ensure('requires_access',          'FieldtypeCheckbox', 'Product: requires access/delivery page');
+		$fAllow  = $ensure('allow_multiple_purchases', 'FieldtypeCheckbox', 'Product: allows multiple purchases');
 
 		if ($templateNames === null) {
 			$templateNames = (array)($this->productTemplateNames ?? []);
@@ -1029,7 +1030,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			$fg = $t->fieldgroup;
 			$changed = false;
 
-			foreach ([$fAllow, $fReq, $fStripe] as $f) {
+			foreach ([$fStripe, $fReq, $fAllow] as $f) {
 				if(!$fg->has($f)) { $fg->add($f); $changed = true; }
 			}
 			if ($changed) $fg->save();
