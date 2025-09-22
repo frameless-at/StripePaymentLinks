@@ -31,7 +31,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	public static function getModuleInfo(): array {
 		return [
 			'title'       => 'StripePaymentLinks',
-			'version'     => '1.0.2', 
+			'version'     => '1.0.3', 
 			'summary'     => 'Stripe payment-link redirects, user/purchases, magic link, mails, modals.',
 			'author'      => 'frameless Media',
 			'autoload'    => true,
@@ -253,7 +253,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			'access_expires',
 			'reset_token',
 			'reset_expires',
-			'purchases', // Repeater
+			'spl_purchases', // Repeater
 		];
 		$repeaterInnerNames = [
 			'product_id',
@@ -330,7 +330,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	
 		// 4) Delete fields (only if not used elsewhere)
 		// 4a) Delete repeater (this will also remove its repeater template/items)
-		if (($purchases = $fields->get('purchases')) && $purchases->id) {
+		if (($purchases = $fields->get('spl_purchases')) && $purchases->id) {
 			// ensure detached from all templates
 			foreach ($templates as $t) {
 				/** @var \ProcessWire\Template $t */
@@ -654,12 +654,12 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			 }
 	 
 			 // Persist single purchase item
-			 if ($buyer->hasField('purchases')) {
+			 if ($buyer->hasField('spl_purchases')) {
 				 $buyer->of(false);
-				 $item = $buyer->purchases->getNew();
+				 $item = $buyer->spl_purchases->getNew();
 				 $item->set('purchase_date', time());
 				 $item->set('purchase_lines', implode("\n", $lines));
-				 $buyer->purchases->add($item);
+				 $buyer->spl_purchases->add($item);
 				 $users->save($buyer, ['quiet' => true]);
 	 
 				 try {
@@ -965,7 +965,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			$fields->saveFieldgroupContext($ctx, $fg);
 		}
 
-		$purchases = $ensure('purchases', 'FieldtypeRepeater', ['label' => 'Purchases']);
+		$purchases = $ensure('spl_purchases', 'FieldtypeRepeater', ['label' => 'Purchases']);
 		/** @var \ProcessWire\Template $repTpl */
 		$repTpl = $purchases->type->getRepeaterTemplate($purchases);
 		$repFg  = $repTpl->fieldgroup;
@@ -1124,10 +1124,10 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	 * @return bool True if the user has purchased the product.
 	 */
 	protected function hasPurchasedProduct(User $user, Page $product): bool {
-		if (!$user->hasField('purchases') || !$user->purchases->count()) return false;
+		if (!$user->hasField('spl_purchases') || !$user->spl_purchases->count()) return false;
 		$targetId = (int) $product->id;
 	
-		foreach ($user->purchases as $p) {
+		foreach ($user->spl_purchases as $p) {
 			try {
 				$ids = $p->meta('product_ids');
 				if (is_array($ids) && in_array($targetId, array_map('intval', $ids), true)) {
@@ -1148,13 +1148,13 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	 * @return void
 	 */
 	protected function attachPurchase(User $user, Page $product, $checkoutSession): void {
-		if (!$user->hasField('purchases')) return;
+		if (!$user->hasField('spl_purchases')) return;
 
 		$user->of(false);
-		$item = $user->purchases->getNew();
+		$item = $user->spl_purchases->getNew();
 		$item->set('purchase_date', time());
 
-		$user->purchases->add($item);
+		$user->spl_purchases->add($item);
 		$this->wire('users')->save($user, ['quiet' => true]);
 
 		try {
