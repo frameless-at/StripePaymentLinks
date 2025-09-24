@@ -22,7 +22,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		$cfg = $this->config; // available in ModuleConfig
 		return [
 			// Essentials
-			'stripeApiKey'           => '',
+			'stripeApiKeys'          => '',
 			'productTemplateNames'   => [],
 			'accessMailPolicy'       => 'newUsersOnly', // never | newUsersOnly | always
 			'accessTokenTtlMinutes'  => 30,
@@ -53,13 +53,14 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		$fs->label = 'Essentials';
 		$fs->name  = 'pl_essentials';
 		$fs->collapsed = Inputfield::collapsedNo;
-
-		// Stripe Secret API Key
-		$f = $this->modules->get('InputfieldText');
-		$f->name  = 'stripeApiKey';
-		$f->label = 'Stripe Secret API Key';
-		$f->notes = 'For retrieving the Checkout Session (success redirect via ?session_id=...).';
-		$f->attr('value', (string)$this->get('stripeApiKey'));
+		
+		// Stripe Secret API Keys (multiple)
+		$f = $this->modules->get('InputfieldTextarea');
+		$f->name  = 'stripeApiKeys';
+		$f->label = 'Stripe Secret API Keys';
+		$f->notes = 'Enter one key per line. The module will try each key until a matching account/session is found.';
+		$f->attr('rows', 4);
+		$f->attr('value', implode("\n", (array)$this->get('stripeApiKeys')));
 		$f->icon = 'key';
 		$fs->add($f);
 

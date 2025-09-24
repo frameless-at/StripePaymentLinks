@@ -256,8 +256,8 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			'spl_purchases', // Repeater
 		];
 		$repeaterInnerNames = [
-			'product_id',
 			'purchase_date',
+			'purchase_lines',
 		];
 		$productFieldNames = [
 			'allow_multiple_purchases',
@@ -554,20 +554,18 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			 return; 
 		 }
 		 require_once $sdk;
-	 
-		 $apiKey = (string)($this->stripeApiKey ?? ($config->stripe['api_key'] ?? ''));
-		 if (!$apiKey) { 
-			 $this->wire('log')->save(self::LOG_PL, 'Stripe API key missing.'); 
-			 return; 
+
+		 // Collect keys from config (multi-key only)
+		 $keys = $this->getStripeKeys();
+		 if (!count($keys)) {
+			 $this->wire('log')->save(self::LOG_PL, 'No Stripe API keys configured.');
+			 return;
 		 }
-	 
+		 
 		 try {
-			 \Stripe\Stripe::setApiKey($apiKey);
-	 
-			 $checkoutSession = \Stripe\Checkout\Session::retrieve([
-				 'id'     => $sessionId,
-				 'expand' => ['line_items.data.price.product', 'customer']
-			 ]);
+			 // Retrieve checkout session using the first working key
+			 $checkoutSession = $this->retrieveCheckoutSessionWithKeys($sessionId, $keys);
+			 if (!$checkoutSession) return;
 			 if (($checkoutSession->payment_status ?? null) !== 'paid') return;
 	 
 			 // Buyer data
@@ -1035,6 +1033,36 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			}
 			if ($changed) $fg->save();
 		}
+	}
+	
+	/** Collect Stripe API keys from config (multi-line textarea). */
+	private function getStripeKeys(): array {
+		$cfgKeys = $this->stripeApiKeys ?? [];
+		if (is_string($cfgKeys)) {
+			$cfgKeys = preg_split('~\r\n|\r|\n~', $cfgKeys) ?: [];
+		}
+		return array_values(array_unique(array_filter(array_map('trim', (array) $cfgKeys))));
+	}
+	
+	/** Try to retrieve a Checkout Session using the first working key. */
+	private function retrieveCheckoutSessionWithKeys(string $sessionId, array $keys) {
+		if (!class_exists(\Stripe\Stripe::class)) return null;
+	
+		foreach ($keys as $apiKey) {
+			try {
+				\Stripe\Stripe::setApiKey($apiKey);
+				$session = \Stripe\Checkout\Session::retrieve([
+					'id'     => $sessionId,
+					'expand' => ['line_items.data.price.product', 'customer'],
+				]);
+				if (is_object($session) && !empty($session->id)) {
+					return $session;
+				}
+			} catch (\Throwable $e) {
+				// try next key
+			}
+		}
+		return null;
 	}
 	
 	/** Small helper to JSON-escape strings safely for inline JS. */
