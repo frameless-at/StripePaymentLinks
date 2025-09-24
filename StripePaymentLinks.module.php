@@ -613,7 +613,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			 $unmapped       = [];
 			 $alreadyDisallowed = false;
 	 
-			 foreach ($lineItems as $li) {
+			/* foreach ($lineItems as $li) {
 				 $label = ($li->price->product->name ?? null)
 					   ?? ($li->description ?? null)
 					   ?? ($li->price->nickname ?? null)
@@ -649,7 +649,45 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 				 if ($already && !$allowsMultiple) {
 					 $alreadyDisallowed = true;
 				 }
-			 }
+			 } */
+			foreach ($lineItems as $li) {
+				$label = ($li->price->product->name ?? null)
+					  ?? ($li->description ?? null)
+					  ?? ($li->price->nickname ?? null)
+					  ?? 'unknown item';
+			
+				$pwProduct = $this->mapStripeLineItemToProduct($li);
+			
+				$pid   = $pwProduct ? (int) $pwProduct->id : 0; // 0 = kein PW-Mapping (z.B. nur Danke-Seite)
+				$qty   = max(1, (int)($li->quantity ?? 1));
+				$title = $pwProduct ? (string)$pwProduct->title : (string)$label;
+			
+				$cur   = strtoupper((string)($li->currency ?? ($checkoutSession->currency ?? 'EUR')));
+				$cents = (isset($li->amount_total) && is_numeric($li->amount_total))
+					? (int)$li->amount_total
+					: ((isset($li->price->unit_amount) && is_numeric($li->price->unit_amount)) ? ((int)$li->price->unit_amount) * $qty : 0);
+			
+				// IMMER eine Line schreiben – auch ohne Mapping
+				$lines[] = $pid . ' • ' . $qty . ' • ' . $title . ' • ' . number_format($cents / 100, 2, '.', '') . ' ' . $cur;
+			
+				if ($pwProduct && $pwProduct->id) {
+					$allMapped[$pwProduct->id] = $pwProduct;
+			
+					$allowsMultiple = $this->productAllowsMultiple($pwProduct);
+					$requiresAccess = $this->productRequiresAccess($pwProduct);
+					$already        = $this->hasPurchasedProduct($buyer, $pwProduct);
+			
+					if ($requiresAccess) {
+						$accessProducts[$pwProduct->id] = $pwProduct;
+					}
+					if ($already && !$allowsMultiple) {
+						$alreadyDisallowed = true;
+					}
+				} else {
+					// nur fürs Logging
+					$unmapped[] = (string) $label;
+				}
+			}
 	 
 			 // Persist single purchase item
 			 if ($buyer->hasField('spl_purchases')) {
