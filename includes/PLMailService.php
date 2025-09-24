@@ -38,6 +38,7 @@ class PLMailService
 			'closingText'   => $mod->t('mail.common.closing_text'),
 			'signatureName' => (string)($mod->mailSignatureName ?? $mod->mailFromName ?? ''),
 			'directLabel'   => $mod->t('mail.common.direct_link'),
+			'greeting'      => $mod->t('mail.common.greeting'),
 			'extraCtas'     => $isMulti ? array_map(
 				fn($l) => ['title' => (string)($l['title'] ?? ''), 'url' => (string)($l['url'] ?? '#')],
 				array_slice($links, 1)
@@ -87,6 +88,7 @@ class PLMailService
 			'fromName'      => (string)($mod->mailFromName ?? ($config->siteName ?? $config->httpHost ?? 'Website')),
 			'brandHeader'   => (string)($mod->mailHeaderName ?? ''),
 			'headerTagline' => $mod->t('mail.common.header_tagline'),
+			'greeting'      => $mod->t('mail.common.greeting'),
 			'closingText'   => $mod->t('mail.resetpwd.notice'),
 		];
 	

@@ -38,7 +38,7 @@ $directLabel  = $val('directLabel', 'Direct link');
 // Auto-greeting if no headline provided
 $headlineOut = $has('headline')
   ? $esc($val('headline'))
-  : ('Hello' . ($has('firstname') ? ' ' . $esc($val('firstname')) : '') . ',');
+  : ($esc($val('greeting', 'Hello')) . ($has('firstname') ? ' ' . $esc($val('firstname')) : '') . ',');
 
 // Decide if the info section should be shown (no explicit flag needed)
 $showInfo = $has('productUrl') || $has('infoLabel') || $has('closingText') || $has('signatureName');

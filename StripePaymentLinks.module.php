@@ -84,7 +84,8 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		'mail.common.footer_note'      => $this->_('This email was sent automatically.'),
 		'mail.common.product_fallback' => $this->_('Product'),
 		'mail.common.direct_link' 	   => $this->_('Direct link'),
-
+		'mail.common.greeting'         => $this->_('Hello'),
+		
 		// ===== MAIL: password reset =====
 		'mail.resetpwd.subject'      => $this->_('Reset your password'),
 		'mail.resetpwd.preheader'    => $this->_('Click the button to set a new password. The link is time-limited.'),
