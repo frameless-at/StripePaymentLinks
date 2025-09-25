@@ -31,7 +31,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	public static function getModuleInfo(): array {
 		return [
 			'title'       => 'StripePaymentLinks',
-			'version'     => '1.0.5', 
+			'version'     => '1.0.6', 
 			'summary'     => 'Stripe payment-link redirects, user/purchases, magic link, mails, modals.',
 			'author'      => 'frameless Media',
 			'autoload'    => true,
@@ -614,43 +614,6 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			 $unmapped       = [];
 			 $alreadyDisallowed = false;
 	 
-			/* foreach ($lineItems as $li) {
-				 $label = ($li->price->product->name ?? null)
-					   ?? ($li->description ?? null)
-					   ?? ($li->price->nickname ?? null)
-					   ?? 'unknown item';
-	 
-				 $pwProduct = $this->mapStripeLineItemToProduct($li);
-				 if (!$pwProduct || !$pwProduct->id) { 
-					 $unmapped[] = (string)$label; 
-					 continue; 
-				 }
-	 
-				 $allMapped[$pwProduct->id] = $pwProduct;
-	 
-				 $allowsMultiple = $this->productAllowsMultiple($pwProduct);
-				 $requiresAccess = $this->productRequiresAccess($pwProduct);
-				 $already        = $this->hasPurchasedProduct($buyer, $pwProduct);
-	 			$pid   = $pwProduct ? (int)$pwProduct->id : 0;
-				 $qty   = max(1, (int)($li->quantity ?? 1));
-				 $title = $pwProduct ? (string)$pwProduct->title
-					 : ( (string)($li->price->product->name ?? $li->description ?? $li->price->nickname ?? 'Item') );
-				 
-				 $cur  = strtoupper((string)($li->currency ?? ($checkoutSession->currency ?? 'EUR')));
-				 $cents = isset($li->amount_total) && is_numeric($li->amount_total)
-					 ? (int)$li->amount_total
-					 : ( (isset($li->price->unit_amount) && is_numeric($li->price->unit_amount)) ? ((int)$li->price->unit_amount) * $qty : 0 );
-				 
-				 $lines[] = $pid . ' • ' . $qty . ' • ' . $title . ' • ' . number_format($cents / 100, 2, '.', '') . ' ' . $cur;
-				 
-				 if ($requiresAccess) {
-					 $accessProducts[$pwProduct->id] = $pwProduct;
-				 }
-	 
-				 if ($already && !$allowsMultiple) {
-					 $alreadyDisallowed = true;
-				 }
-			 } */
 			foreach ($lineItems as $li) {
 				$label = ($li->price->product->name ?? null)
 					  ?? ($li->description ?? null)
@@ -840,11 +803,29 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	 *
 	 * @return string Path to mail layout template.
 	 */
-	public function mailLayoutPath(): string {
-		$layoutPath = (string)($this->mailTemplatePath ?? '');
-		if ($layoutPath && is_file($layoutPath)) return $layoutPath;
-		return $this->moduleMailLayout;
-	}
+	 public function mailLayoutPath(): string {
+		 $layoutPath = (string)($this->mailTemplatePath ?? '');
+		 if ($layoutPath !== '') {
+			 // URL → auf Serverpfad mappen
+			 if (preg_match('~^https?://~i', $layoutPath)) {
+				 $urlsRoot  = rtrim($this->wire('config')->urls->root, '/');
+				 $pathsRoot = rtrim($this->wire('config')->paths->root, '/');
+				 $rel = preg_replace('~^https?://[^/]+~i', '', $layoutPath);  // /site/…
+				 if ($urlsRoot !== '' && str_starts_with($rel, $urlsRoot)) {
+					 $rel = substr($rel, strlen($urlsRoot));                  // relativ ab /
+				 }
+				 $layoutPath = $pathsRoot . '/' . ltrim($rel, '/');
+			 }
+			 // Relativ ab /site/… erlauben
+			 if (str_starts_with($layoutPath, '/site/')) {
+				 $layoutPath = $this->wire('config')->paths->root . ltrim($layoutPath, '/');
+			 }
+			 if (is_file($layoutPath)) return $layoutPath;
+	 
+			 $this->wire('log')->save('mail', 'Mail layout not found: ' . $layoutPath . ' – using module default.');
+		 }
+		 return $this->moduleMailLayout;
+	 }
 
 	/**
 	 * Returns the absolute API endpoint URL for the module.

@@ -205,7 +205,7 @@ final class PLModalService
 			$title   = $esc($l['title'] ?? $prodFallback);
 			$url     = $esc($l['url']   ?? '#');
 			$hint    = $esc($this->mod->t('ui.access.single_hint'));
-			return '<div class="pl-access-block text-center my-5"><p>'.$hint.'</p>'
+			return '<div class="pl-access-block text-center mb-5"><p>'.$hint.'</p>'
 				. '<p><a class="btn btn-primary btn-lg" href="'.$url.'">'.$title.'</a></p></div>';
 		}
 
@@ -214,10 +214,10 @@ final class PLModalService
 		foreach ($links as $l) {
 			$title = $esc($l['title'] ?? $prodFallback);
 			$url   = $esc($l['url']   ?? '#');
-			$btns[] = '<a class="btn btn-primary btn-lg mb-2" target="_blank" href="'.$url.'">'.$title.'</a>';
+			$btns[] = '<a class="btn btn-primary btn-lg mx-2 mb-2" target="_blank" href="'.$url.'">'.$title.'</a>';
 		}
 
-		return '<div class="pl-access-block text-center my-5"><p>'.$hint.'</p><p>'
+		return '<div class="pl-access-block text-center mb-5"><p>'.$hint.'</p><p>'
 			. implode(' ', $btns)
 			. '</p></div>';
 	}
