@@ -76,11 +76,12 @@ The module is designed for small e-commerce or membership scenarios where a full
    https://example.com/thank-you/?session_id={CHECKOUT_SESSION_ID}
    ```
 
-2. On your product pages templates the module added two checkboxes:
+2. On your product pages templates the module added one field and two checkboxes:
+  - stripe_product_id
   - requires_access
   - allow_multiple_purchases
   
-  Check/uncheck them on your product pages as needed
+Copy the product ids from stripe and check/uncheck the checkboxes on your product pages as needed
   
 3. In ProcessWire templates, call the module’s render method:
 
