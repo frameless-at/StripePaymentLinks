@@ -1,0 +1,706 @@
+<?php namespace ProcessWire;
+
+/**
+ * Class PLSyncHelper
+ *
+ * Helper used by StripePaymentLinks to synchronize Stripe Checkout Sessions
+ * into ProcessWire user purchase records (repeater `spl_purchases`).
+ *
+ * Responsibilities:
+ * - Read module config, resolve API keys and date filters.
+ * - Page through Stripe Checkout Sessions and filter to paid sessions.
+ * - For each session, fetch line items, map Stripe products to PW page IDs,
+ *   and decide whether to CREATE or UPDATE a purchase item.
+ * - Persist data in the same structure the module writes:
+ *     - Field: purchase_date (timestamp)
+ *     - Field: purchase_lines (human readable lines)
+ *     - Meta:  product_ids (array<int>)
+ *     - Meta:  stripe_session (expanded Stripe session array)
+ *
+ * Notes:
+ * - Dry-run and update/create behavior is controlled by runtime flags set in
+ *   runSyncFromConfig().
+ */
+final class PLSyncHelper extends Wire {
+
+  /** @var StripePaymentLinks Reference to the main module */
+  private $mod;
+  
+  /**
+  * Constructor.
+  *
+  * @param \ProcessWire\StripePaymentLinks $mod Reference to the main module.
+  */
+  public function __construct(\ProcessWire\StripePaymentLinks $mod) {
+	$this->mod = $mod;
+  }
+  
+  /** Runtime options (set by runSyncFromConfig) */
+  private bool $optDry = true;
+  private bool $optUpdateExisting = false;
+  private bool $optCreateMissing  = false;
+  
+
+	/* ========= Helpers: config / keys / time ========= */
+  
+	/**
+	 * Safe getter for nested object/array paths.
+	 *
+	 * @param mixed $src   Source object/array.
+	 * @param array $path  Key/property path, e.g. ['price','product','name'].
+	 * @return mixed|null  Found value or null if missing.
+	 */
+	private function g($src, array $path) {
+	$cur = $src;
+	foreach ($path as $k) {
+	  if (is_object($cur)) {
+		if (!isset($cur->$k)) return null;
+		$cur = $cur->$k;
+	  } elseif (is_array($cur)) {
+		if (!array_key_exists($k, $cur)) return null;
+		$cur = $cur[$k];
+	  } else {
+		return null;
+	  }
+	}
+	return $cur;
+  }
+  
+  /**
+ * Split raw keys input (string or array) into a clean list.
+ *
+ * @param string|array $raw
+ * @return array<string>
+ */
+  private function splitKeys($raw): array {
+	if (is_string($raw)) $raw = preg_split('~\R+~', trim($raw)) ?: [];
+	return array_values(array_filter(array_map(fn($k)=>trim((string)$k), (array)$raw)));
+  }
+  
+  /**
+ * Select subset of keys by indices; if none given, return all.
+ *
+ * @param array<string> $all
+ * @param array<int>    $idx
+ * @return array<string>
+ */
+  private function selectKeys(array $all, array $idx): array {
+	$idx = array_map('intval', $idx);
+	return $idx ? array_values(array_intersect_key($all, array_flip($idx))) : $all;
+  }
+
+  /**
+ * Mask a Stripe key for logs (TEST/LIVE + last 4 chars).
+ *
+ * @param string $k
+ * @return string
+ */
+  private function maskKey(string $k): string {
+	return (strpos($k, '_test_') !== false ? 'TEST' : 'LIVE') . ' • …' . substr($k, -4);
+  }
+
+  /**
+ * Build Stripe 'created' filter array from timestamps.
+ *
+ * @param int $fromTs
+ * @param int $toTs
+ * @return array
+ */
+  private function createdFilterParams(int $fromTs, int $toTs): array {
+	$c = [];
+	if ($fromTs) $c['gte'] = $fromTs;
+	if ($toTs)   $c['lte'] = $toTs;
+	return $c ? ['created' => $c] : [];
+  }
+
+
+/* ========= Helpers: Stripe ========= */
+
+/**
+ * Ensure Stripe SDK is present and add version info to report.
+ *
+ * @param \ProcessWire\Session $ses
+ * @param array<string>        $report
+ * @return bool True if SDK found, false otherwise (and report is stored).
+ */
+  private function ensureStripe(\ProcessWire\Session $ses, array &$report): bool {
+	$sdk = $this->mod->wire('config')->paths->siteModules . 'StripePaymentLinks/vendor/stripe-php/init.php';
+	if (!is_file($sdk)) { $report[] = 'Stripe SDK: NOT FOUND'; $ses->set('pl_sync_report', implode("\n",$report)); return false; }
+	require_once $sdk;
+	$ver = (class_exists('\Stripe\Stripe') && defined('\Stripe\Stripe::VERSION')) ? \Stripe\Stripe::VERSION : null;
+	$report[] = 'Stripe SDK: found' . ($ver ? " (v{$ver})" : '');
+	$report[] = '';
+	return true;
+  }
+
+
+/**
+ * List first page of sessions for a single key (debug/report helper).
+ *
+ * @param string        $apiKey
+ * @param array<string,mixed> $params
+ * @param array<string> $report
+ * @return void
+ */
+  private function listFirstPageForKey(string $apiKey, array $params, array &$report): void {
+	\Stripe\Stripe::setApiKey($apiKey);
+	$page = \Stripe\Checkout\Session::all($params);
+	$data = (is_object($page) && isset($page->data) && is_array($page->data)) ? $page->data : [];
+	$report[] = sprintf('Key (%s): sessions=%d%s', $this->maskKey($apiKey), count($data), (!empty($page->has_more) ? ' (has_more)' : ''));
+	$max = min(5, count($data));
+	for ($i=0; $i<$max; $i++) $this->reportSessionRow($data[$i], $report);
+  }
+  
+  /**
+ * Fetch all sessions for a key with pagination and optional date filter.
+ *
+ * @param string $apiKey
+ * @param int    $fromTs
+ * @param int    $toTs
+ * @param int    $limitPerPage
+ * @return array<int,object> Stripe Checkout Session objects.
+ */  
+  private function fetchSessionsForKey(string $apiKey, int $fromTs, int $toTs, int $limitPerPage = 100): array {
+	\Stripe\Stripe::setApiKey($apiKey);
+	$params = ['limit' => $limitPerPage];
+	if ($fromTs || $toTs) {
+	  $created = [];
+	  if ($fromTs) $created['gte'] = $fromTs;
+	  if ($toTs)   $created['lte'] = $toTs;
+	  $params['created'] = $created;
+	}
+	$out = [];
+	$startingAfter = null;
+	do {
+	  $pageParams = $params;
+	  if ($startingAfter) $pageParams['starting_after'] = $startingAfter;
+	  $page = \Stripe\Checkout\Session::all($pageParams);
+	  $data = (is_object($page) && isset($page->data) && is_array($page->data)) ? $page->data : [];
+	  foreach ($data as $s) $out[] = $s;
+	  $startingAfter = count($data) ? end($data)->id : null;
+	} while (!empty($page->has_more));
+	return $out;
+  }
+
+/**
+ * Append a single session row to the report and (if paid) run the
+ * full CREATE/UPDATE decision flow. Will also perform writes when
+ * dry-run is disabled.
+ *
+ * @param object $s       Stripe Checkout Session object.
+ * @param array  $report  Report buffer (by ref).
+ * @return void
+ */  
+private function reportSessionRow($s, array &$report): void {
+	  $sid  = (string)($s->id ?? '');
+	  $paid = ((string)($s->payment_status ?? '')) === 'paid';
+	  $when = isset($s->created) ? date('Y-m-d H:i', (int)$s->created) : '';
+	  $report[] = '  - ' . $sid . ' • ' . ((string)($s->payment_status ?? '')) . ' • ' . $when;
+  
+	  if (!$paid) return;
+  
+	  $email = $this->g($s, ['customer_details','email']) ?? $this->g($s, ['customer_email']);
+	  if (!$email) { 
+		  $report[] = '      [SKIP] no email'; 
+		  return; 
+	  }
+  
+	  $u = $this->findUserByEmail($email);
+	  $linkedId = ($u ? $this->findLinkedPurchaseId($u, $sid) : null);
+  
+	  $status = ($u && $linkedId) ? 'LINKED' : 'MISSING';
+	  $report[] = '      ['.$status.'] ' . $email;
+  
+	  $lines = []; $productIds = []; $compact = [];
+	  try {
+		  $items = $this->fetchLineItems($sid);
+		  [$lines, $productIds, $compact] = $this->buildLinesMetaFromStripeItems($items, (string)($s->currency ?? 'EUR'));
+		  foreach ($lines as $L) $report[] = '      ' . $L;
+		  $report[] = '      product_ids: [' . implode(', ', array_map('intval', $productIds)) . ']';
+		  $report[] = '      stripe_line_items: ' . count($compact);
+	  } catch (\Throwable $e) {
+		  $report[] = '      [line-items error] ' . $e->getMessage();
+		  return;
+	  }
+  
+	  if (!$u) {
+		  if (!$this->optCreateMissing) {
+			  $report[] = '      ⇒ action: SKIP (user missing)';
+			  return;
+		  }
+		  $fullName = (string)($this->g($s, ['customer_details','name']) ?? '');
+		  if ($this->optDry) {
+			  $report[] = '      ⇒ action: CREATE (user) + CREATE (purchase)';
+			  return;
+		  }
+		  $u = $this->createUserLikeModule($email, $fullName);
+		  if (!$u || !$u->id) {
+			  $report[] = '      [WRITE ERROR] could not create user';
+			  return;
+		  }
+	  }
+  
+	  $sessionForPersist = null;
+	  try { 
+		  $expanded = $this->retrieveExpandedSession($sid);
+		  $sessionForPersist = $expanded ?: $s;
+	  } catch (\Throwable $e) {
+		  $sessionForPersist = $s;
+	  }
+  
+	  if ($linkedId) {
+		  if ($this->optUpdateExisting) {
+			  $report[] = '      ⇒ action: UPDATE purchase #' . (int)$linkedId;
+			  if (!$this->optDry) {
+				  try {
+					  $this->persistUpdatePurchase($u, (int)$linkedId, $sessionForPersist, $lines, $productIds);
+				  } catch (\Throwable $e) {
+					  $report[] = '      [WRITE ERROR] ' . $e->getMessage();
+				  }
+			  }
+		  } else {
+			  $report[] = '      ⇒ action: LINKED (no update)';
+		  }
+	  } else {
+		  $report[] = '      ⇒ action: CREATE (purchase)';
+		  if (!$this->optDry) {
+			  try {
+				  $this->persistNewPurchase($u, $sessionForPersist, $lines, $productIds);
+				  $report[] = '      [WRITE] created spl_purchases item';
+			  } catch (\Throwable $e) {
+				  $report[] = '      [WRITE ERROR] ' . $e->getMessage();
+			  }
+		  }
+	  }
+  }  
+  
+
+/**
+ * Fetch line items for a given Stripe Checkout Session.
+ *
+ * @param string $sessionId
+ * @return object Stripe list object (data[] of line items).
+ */  
+  private function fetchLineItems(string $sessionId) {
+	try {
+	  return \Stripe\Checkout\Session::allLineItems($sessionId, [
+		'limit'  => 100,
+		'expand' => ['data.price.product'],
+	  ]);
+	} catch (\Throwable $e) {
+	  return \Stripe\Checkout\Session::allLineItems($sessionId, ['limit' => 100]);
+	}
+  }
+
+/**
+ * Format a single line item into the purchase_lines string format:
+ * "{product_id} • {qty} • {name} • {amount currency}".
+ *
+ * @param object $li
+ * @param string $fallbackCurrency
+ * @return string
+ */
+  private function formatLineItem($li, string $fallbackCurrency): string {
+	$stripePid = $this->liStripeProductId($li);
+	$mappedId  = $stripePid !== '' ? ($this->mapStripeProductToPageId($stripePid) ?? 0) : 0;
+  
+	$qty  = max(1, (int)($this->g($li, ['quantity']) ?? 1));
+	$name = $this->g($li, ['description'])
+		 ?? $this->g($li, ['price','product','name'])
+		 ?? $this->g($li, ['price','nickname'])
+		 ?? 'Item';
+  
+	$cents = (int)($this->g($li, ['amount_total'])
+			 ?? $this->g($li, ['amount'])
+			 ?? 0);
+  
+	$cur = strtoupper((string)($this->g($li, ['currency']) ?? $fallbackCurrency ?: 'EUR'));
+  
+	return $mappedId . ' • ' . $qty . ' • ' . $name . ' • ' . number_format($cents/100, 2, '.', '') . ' ' . $cur;
+  }
+
+/**
+ * Build purchase_lines, product_ids and a compact line-items array
+ * from Stripe line items. No writes; used for decision + persistence.
+ *
+ * @param object|array $items            Stripe list object or array-like.
+ * @param string       $sessionCurrency  Fallback currency.
+ * @return array{0:array<int,string>,1:array<int,int>,2:array<int,array>}
+ */
+  private function buildLinesMetaFromStripeItems($items, string $sessionCurrency = 'EUR'): array {
+	$lines = [];
+	$productIds = [];
+	$compact = [];
+  
+	$data = (is_object($items) && isset($items->data) && is_array($items->data)) ? $items->data : [];
+	foreach ($data as $li) {
+	  $stripePid = $this->liStripeProductId($li);
+	  $mappedId  = $stripePid !== '' ? ($this->mapStripeProductToPageId($stripePid) ?? 0) : 0;
+  
+	  $qty   = max(1, (int)($this->g($li, ['quantity']) ?? 1));
+	  $name  = $this->g($li, ['description'])
+		   ?? $this->g($li, ['price','product','name'])
+		   ?? $this->g($li, ['price','nickname'])
+		   ?? 'Item';
+  
+	  $cents = (int)($this->g($li, ['amount_total'])
+			  ?? $this->g($li, ['amount'])
+			  ?? 0);
+  
+	  $cur   = strtoupper((string)($this->g($li, ['currency']) ?? $sessionCurrency ?: 'EUR'));
+	  $lines[] = $mappedId . ' • ' . $qty . ' • ' . $name . ' • ' . number_format($cents/100, 2, '.', '') . ' ' . $cur;
+	  $productIds[] = (int)$mappedId;
+  
+	  $compact[] = array_filter([
+		'id'             => $this->g($li, ['id']) ?? null,
+		'quantity'       => $qty,
+		'amount_total'   => $cents,
+		'currency'       => $cur,
+		'price_id'       => $this->g($li, ['price','id']) ?? null,
+		'stripe_product' => $stripePid ?: null, 
+		'product_id'     => (int)$mappedId,   
+		'product_name'   => $name,
+	  ], static fn($v) => $v !== null);
+	}
+  
+	return [$lines, $productIds, $compact];
+  }
+  
+/* ========= Helpers: PW users / purchases ========= */
+
+/**
+ * Find a user by email.
+ *
+ * @param string $email
+ * @return \ProcessWire\User|null
+ */
+  private function findUserByEmail(string $email): ?\ProcessWire\User {
+	$users = $this->wire('users'); $san = $this->wire('sanitizer');
+	$u = $users->get('email=' . $san->email($email));
+	return ($u && $u->id) ? $u : null;
+  }
+
+/**
+ * Check if the given session id is already linked on user's purchases.
+ *
+ * @param \ProcessWire\User $u
+ * @param string            $sessionId
+ * @return bool
+ */
+  private function isSessionLinkedToUser(\ProcessWire\User $u, string $sessionId): bool {
+	if (!$u->hasField('spl_purchases')) return false;
+	foreach ($u->spl_purchases as $item) {
+	  $sid = $this->extractSessionIdFromMeta($item->meta('stripe_session'));
+	  if ($sid && $sid === $sessionId) return true;
+	}
+	return false;
+  }
+
+/**
+ * Extract session id from meta('stripe_session').
+ *
+ * @param mixed $meta
+ * @return string|null
+ */
+  private function extractSessionIdFromMeta($meta): ?string {
+	try {
+	  if (is_array($meta) && !empty($meta['id'])) return (string)$meta['id'];
+	  if (is_object($meta)) {
+		if (method_exists($meta, 'toArray')) {
+		  $arr = $meta->toArray();
+		  if (!empty($arr['id'])) return (string)$arr['id'];
+		}
+		if (isset($meta->id) && $meta->id) return (string)$meta->id;
+	  }
+	} catch (\Throwable $e) {}
+	return null;
+  }
+
+/**
+ * Retrieve an expanded Stripe session for persistence in meta.
+ *
+ * @param string $sessionId
+ * @return object|null
+ */
+  private function retrieveExpandedSession(string $sessionId) {
+	try {
+	  return \Stripe\Checkout\Session::retrieve([
+		'id'     => $sessionId,
+		'expand' => ['line_items.data.price.product', 'customer'],
+	  ]);
+	} catch (\Throwable $e) {
+	  // Fallback: notfalls die unexpandierte Session zurückgeben (sollte in der Praxis nicht nötig sein)
+	  try { return \Stripe\Checkout\Session::retrieve($sessionId); } catch (\Throwable $e2) {}
+	  return null;
+	}
+  }
+  
+/**
+* Extract Stripe product id from a line item in a robust way.
+*
+* @param object $li
+* @return string
+*/ 
+  private function liStripeProductId($li): string {
+	try {
+	  $pp = $this->g($li, ['price','product']);
+	  if (is_object($pp) && !empty($pp->id)) return (string)$pp->id;
+	  if (is_string($pp) && $pp !== '') return $pp;
+	} catch (\Throwable $e) {}
+	return '';
+  }
+  
+/**
+ * Map a Stripe product id to a ProcessWire product page id.
+ *
+ * @param string $stripeProductId
+ * @return int|null Page id or null if not found.
+ */
+  private function mapStripeProductToPageId(string $stripeProductId): ?int {
+	if ($stripeProductId === '') return null;
+	$pages = $this->wire('pages');
+	$san   = $this->wire('sanitizer');
+  
+	// optional: auf konfigurierte Produkt-Templates einschränken
+	$tplNames = array_values(array_filter((array)($this->mod->productTemplateNames ?? [])));
+	$tplNames = array_map([$san, 'name'], $tplNames);
+	$tplSel   = $tplNames ? ('template=' . implode('|', $tplNames) . ', ') : '';
+  
+	$sid = $san->selectorValue($stripeProductId);
+  
+	if ($tplSel) {
+	  if (($p = $pages->get($tplSel . "stripe_product_id=$sid")) && $p->id) return (int)$p->id;
+	}
+	if (($p = $pages->get("stripe_product_id=$sid")) && $p->id) return (int)$p->id;
+  
+	return null;
+  }
+
+/**
+ * Return the purchase repeater page id linked to this session id, if any.
+ *
+ * @param \ProcessWire\User $u
+ * @param string            $sessionId
+ * @return int|null
+ */
+  private function findLinkedPurchaseId(\ProcessWire\User $u, string $sessionId): ?int {
+	if (!$u->hasField('spl_purchases') || $sessionId === '') return null;
+	foreach ($u->spl_purchases as $item) {
+	  $sid = $this->extractSessionIdFromMeta($item->meta('stripe_session'));
+	  if ($sid && $sid === $sessionId) return (int)$item->id;
+	}
+	return null;
+  }
+
+/**
+ * Persist a new purchase repeater item (CREATE path).
+ * Stores purchase_date, purchase_lines and meta identical to the module.
+ *
+ * @param \ProcessWire\User $u
+ * @param mixed             $sessionObj Expanded or raw session object/array.
+ * @param array<int,string> $lines
+ * @param array<int,int>    $productIds
+ * @return void
+ */
+  private function persistNewPurchase(
+	\ProcessWire\User $u,
+	$sessionObj,
+	array $lines,
+	array $productIds
+  ): void {
+	/** @var \ProcessWire\Users $users */
+	$users = $this->wire('users');
+  
+	if (!$u->hasField('spl_purchases')) return;
+  
+	// created aus Session (Fallback: now)
+	$createdTs = 0;
+	try {
+	  if (is_object($sessionObj) && isset($sessionObj->created))      $createdTs = (int)$sessionObj->created;
+	  elseif (is_array($sessionObj) && isset($sessionObj['created'])) $createdTs = (int)$sessionObj['created'];
+	} catch (\Throwable $e) {}
+	if ($createdTs <= 0) $createdTs = time();
+  
+	$u->of(false);
+	$item = $u->spl_purchases->getNew();
+	$item->set('purchase_date', $createdTs);
+	$item->set('purchase_lines', implode("\n", $lines));
+	$u->spl_purchases->add($item);
+	$users->save($u, ['quiet' => true]);
+  
+	try {
+	  $item->meta('product_ids', array_values(array_map('intval', $productIds)));
+  
+	  // WICHTIG: exakt wie im Modul – expandierte Session unter 'stripe_session'
+	  $sessionArr = $sessionObj;
+	  if (is_object($sessionObj) && method_exists($sessionObj, 'toArray')) $sessionArr = $sessionObj->toArray();
+	  if (is_object($sessionArr)) $sessionArr = (array)$sessionArr;
+  
+	  $item->meta('stripe_session', is_array($sessionArr) ? $sessionArr : (array)$sessionObj);
+	  // KEIN 'stripe_line_items' mehr speichern – das braucht dein Template nicht.
+	  $item->save();
+	} catch (\Throwable $e) {
+	  $this->wire('log')->save(\ProcessWire\StripePaymentLinks::LOG_PL, '[SYNC] persist meta warning: '.$e->getMessage());
+	}
+  
+	$u->of(true);
+  }
+
+/**
+ * Update an existing purchase repeater item (UPDATE path).
+ *
+ * @param \ProcessWire\User $u
+ * @param int               $purchaseItemId
+ * @param mixed             $sessionObj Expanded or raw session object/array.
+ * @param array<int,string> $lines
+ * @param array<int,int>    $productIds
+ * @return void
+ */
+  private function persistUpdatePurchase(
+	\ProcessWire\User $u,
+	int $purchaseItemId,
+	$sessionObj,
+	array $lines,
+	array $productIds
+  ): void {
+	/** @var \ProcessWire\Users $users */
+	$users = $this->wire('users');
+	if (!$u->hasField('spl_purchases')) return;
+  
+	$item = $u->spl_purchases->get("id=$purchaseItemId");
+	if (!$item || !$item->id) return;
+  
+	// created aus Session (Fallback: now)
+	$createdTs = 0;
+	try {
+	  if (is_object($sessionObj) && isset($sessionObj->created))      $createdTs = (int)$sessionObj->created;
+	  elseif (is_array($sessionObj) && isset($sessionObj['created'])) $createdTs = (int)$sessionObj['created'];
+	} catch (\Throwable $e) {}
+	if ($createdTs <= 0) $createdTs = time();
+  
+	$u->of(false);
+	$item->set('purchase_date', $createdTs);
+	$item->set('purchase_lines', implode("\n", $lines));
+	$users->save($u, ['quiet' => true]);
+  
+	try {
+	  $item->meta('product_ids', array_values(array_map('intval', $productIds)));
+  
+	  $sessionArr = $sessionObj;
+	  if (is_object($sessionObj) && method_exists($sessionObj, 'toArray')) $sessionArr = $sessionObj->toArray();
+	  if (is_object($sessionArr)) $sessionArr = (array)$sessionArr;
+  
+	  $item->meta('stripe_session', is_array($sessionArr) ? $sessionArr : (array)$sessionObj);
+	  $item->save();
+	} catch (\Throwable $e) {
+	  $this->wire('log')->save(\ProcessWire\StripePaymentLinks::LOG_PL, '[SYNC] update meta warning: '.$e->getMessage());
+	}
+  
+	$u->of(true);
+  }
+  
+/**
+ * Create a new user similar to the module's behavior (name from email,
+ * random password, must_set_password flag, optional title, add 'customer' role).
+ *
+ * @param string $email
+ * @param string $fullName
+ * @return \ProcessWire\User|null
+ */
+  private function createUserLikeModule(string $email, string $fullName = ''): ?\ProcessWire\User {
+	/** @var \ProcessWire\Users $users */
+	$users = $this->wire('users');
+	$san   = $this->wire('sanitizer');
+	$roles = $this->wire('roles');
+  
+	try {
+	  $u = new \ProcessWire\User();
+	  $u->name  = $san->pageName($email, true);
+	  $u->email = $email;
+	  $u->pass  = bin2hex(random_bytes(8));
+	  if ($u->hasField('must_set_password')) $u->must_set_password = 1;
+	  if ($fullName !== '') $u->title = $fullName;
+	  $users->save($u, ['quiet' => true]);
+  
+	  // Rolle 'customer' zuweisen, falls vorhanden
+	  try {
+		$role = $roles->get('customer');
+		if ($role && $role->id && !$u->hasRole($role)) {
+		  $u->of(false);
+		  $u->roles->add($role);
+		  $users->save($u, ['quiet' => true]);
+		  $u->of(true);
+		}
+	  } catch (\Throwable $e) {}
+  
+	  return $u;
+	} catch (\Throwable $e) {
+	  $this->wire('log')->save(\ProcessWire\StripePaymentLinks::LOG_PL, '[SYNC] user create error: '.$e->getMessage());
+	  return null;
+	}
+  }
+  
+/* ========= Public: run ========= */
+
+/**
+ * Entry point from the module config UI. Reads options, ensures Stripe SDK,
+ * paginates all sessions for selected keys within the date range, and runs
+ * the per-session logic (report + writes depending on dry-run).
+ *
+ * @param array<string,mixed> $cfg Saved module config.
+ * @return void
+ */
+  public function runSyncFromConfig(array $cfg): void {
+	$log = $this->wire('log'); $ses = $this->wire('session');
+
+	$allKeys = $this->splitKeys($cfg['stripeApiKeys'] ?? '');
+	$useKeys = $this->selectKeys($allKeys, (array)($cfg['pl_sync_keys'] ?? []));
+	$fromTs  = (int)($cfg['pl_sync_from'] ?? 0);
+	$toTs    = (int)($cfg['pl_sync_to']   ?? 0);
+	$dry     = (bool)($cfg['pl_sync_dry_run'] ?? true);
+	$upd     = (bool)($cfg['pl_sync_update_existing'] ?? false);
+	$mkUsr   = (bool)($cfg['pl_sync_create_missing'] ?? false);
+	
+	$this->optDry            = $dry;
+	$this->optUpdateExisting = $upd;
+	$this->optCreateMissing  = $mkUsr;
+	
+	$r = [];
+	$r[] = '== StripePaymentLinks: Sync (dry report) ==';
+	$r[] = 'Mode: ' . ($dry ? 'DRY RUN (no writes)' : 'WRITE');
+	$r[] = 'Update existing: ' . ($upd ? 'yes' : 'no');
+	$r[] = 'Create missing users: ' . ($mkUsr ? 'yes' : 'no');
+	$r[] = 'Keys configured: ' . count($allKeys);
+	$r[] = 'Keys selected:   ' . count($useKeys);
+	if ($useKeys) { $r[] = 'Selected keys:'; foreach ($useKeys as $k) $r[] = '  - ' . $this->maskKey($k); }
+	$r[] = 'From: ' . ($fromTs ? date('Y-m-d', $fromTs) : '—');
+	$r[] = 'To:   ' . ($toTs   ? date('Y-m-d', $toTs)   : '—');
+
+	if (!$useKeys) { $r[] = ''; $r[] = 'No API keys → abort.'; $ses->set('pl_sync_report', implode("\n",$r)); return; }
+	if (!$this->ensureStripe($ses, $r)) return;
+
+	$params = array_merge(['limit'=>10], $this->createdFilterParams($fromTs, $toTs));
+	$r[] = 'Querying Stripe (full pagination per key)…';
+	
+	$total = 0;
+	foreach ($useKeys as $key) {
+	  try {
+		$all = $this->fetchSessionsForKey($key, $fromTs, $toTs);
+		$total += count($all);
+		$r[] = sprintf('Key (%s): sessions=%d', $this->maskKey($key), count($all));
+		foreach ($all as $s) {
+		  $this->reportSessionRow($s, $r);
+		}
+	  } catch (\Throwable $e) {
+		$r[] = '  [Stripe error] ' . $e->getMessage();
+		$log->save(\ProcessWire\StripePaymentLinks::LOG_PL, '[SYNC] stripe error: ' . $e->getMessage());
+	  }
+	}
+	
+	$r[] = 'Total sessions found (all pages): ' . $total;
+	$r[] = $this->optDry ? 'Pagination OK. (read-only)' : 'Pagination OK. (writes applied when needed)';
+
+	$ses->set('pl_sync_report', implode("\n",$r));
+	$log->save(\ProcessWire\StripePaymentLinks::LOG_PL, '[SYNC] listed first pages (read-only)');
+  }
+}

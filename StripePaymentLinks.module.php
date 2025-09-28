@@ -46,9 +46,9 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	protected string $moduleMailLayout;
 
 	/** Log channels */
-	private const LOG_PL   = 'stripepaymentlinks';
-	private const LOG_MAIL = 'mail';
-	private const LOG_SEC  = 'security';
+	public const LOG_PL   = 'stripepaymentlinks';
+	public const LOG_MAIL = 'mail';
+	public const LOG_SEC  = 'security';
 
 	/** Services (lazy) */
 	private ?PLMailService   $mailService  = null;
@@ -207,6 +207,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			$this->ensureFields();
 			$this->ensureProductFields($data['productTemplateNames'] ?? null);
 			$this->ensureCustomerRoleExists();
+			$this->triggerSyncStripeCustomers($data);
 		});
 	}
 	
@@ -382,6 +383,45 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	
 		// Done
 	}
+	/**
+	 * Handle saving of module config and optionally trigger a manual sync
+	 * when the "Run sync now" button was pressed in the config UI.
+	 *
+	 * IMPORTANT: This method belongs in the module class (StripePaymentLinks),
+	 * not in the ModuleConfig class.
+	 *
+	 * @param array $data Config values being saved.
+	 * @return array The config array to persist.
+	 */
+	public function ___saveConfig($data) {
+		$this->wire('log')->save('stripepaymentlinks', '___saveConfig called');
+
+		// 1) Persist config first
+		$data = parent::___saveConfig($data);
+	
+		// 2) If the submit button was pressed, run the sync action
+		$input = $this->wire('input');
+		if ($input->post('pl_sync_run')) {
+			try {
+				// Re-read the freshly saved config to ensure we use the final values
+				$cfg = $this->wire('modules')->getConfig('StripePaymentLinks');
+	
+				// Example: call your sync helper here (inject $this if needed)
+				// $helper = new \ProcessWire\PLSyncHelper($this);
+				// $helper->runSyncFromConfig($cfg);
+	
+				// Temporary smoke test feedback (replace once helper is wired)
+				$this->message('Sync started – check logs for details.');
+				$this->wire('log')->save('stripepaymentlinks', '[SYNC] Triggered via config UI');
+	
+			} catch (\Throwable $e) {
+				$this->error('Sync error: ' . $e->getMessage());
+				$this->wire('log')->save('stripepaymentlinks', '[SYNC ERROR] ' . $e->getMessage());
+			}
+		}
+	
+		return $data;
+	}
 	
 	/* ========================= Public API ========================= */
 	
@@ -535,77 +575,60 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	 * @return void
 	 */
 	 public function processCheckout(Page $currentPage): void {
-		 $input     = $this->wire('input');
-		 $session   = $this->wire('session');
-		 $users     = $this->wire('users');
-		 $sanitizer = $this->wire('sanitizer');
-		 $config    = $this->wire('config');
+	 $input     = $this->wire('input');
+	 $session   = $this->wire('session');
+	 $users     = $this->wire('users');
+	 $sanitizer = $this->wire('sanitizer');
+	 $config    = $this->wire('config');
 	 
-		 $sessionId = $input->get->text('session_id');
-		 if (!$sessionId) return;
+	 $sessionId = $input->get->text('session_id');
+	 if (!$sessionId) return;
 	 
-		 // Idempotency per browser session
-		 $processed = $session->get('pl_processed_sessions') ?: [];
-		 if (in_array($sessionId, $processed, true)) return;
+	 // Idempotency per browser session
+	 $processed = $session->get('pl_processed_sessions') ?: [];
+	 if (in_array($sessionId, $processed, true)) return;
 	 
-		 // Stripe SDK
-		 $sdk = $this->stripeSdkPath ?? (__DIR__ . '/vendor/stripe-php/init.php');
-		 if (!is_file($sdk)) { 
-			 $this->wire('log')->save(self::LOG_PL, 'Stripe SDK not found'); 
-			 return; 
-		 }
-		 require_once $sdk;
-
-		 // Collect keys from config (multi-key only)
-		 $keys = $this->getStripeKeys();
-		 if (!count($keys)) {
-			 $this->wire('log')->save(self::LOG_PL, 'No Stripe API keys configured.');
+	 // Stripe SDK
+	 $sdk = $this->stripeSdkPath ?? (__DIR__ . '/vendor/stripe-php/init.php');
+	 if (!is_file($sdk)) { 
+		 $this->wire('log')->save(self::LOG_PL, 'Stripe SDK not found'); 
+		 return; 
+	 }
+	 require_once $sdk;
+	 
+	 $keys = $this->getStripeKeys();
+	 if (!count($keys)) {
+		 $this->wire('log')->save(self::LOG_PL, 'No Stripe API keys configured.');
+		 return;
+	 }
+	 
+	 try {
+		 $checkoutSession = $this->retrieveCheckoutSessionWithKeys($sessionId, $keys);
+		 if (!$checkoutSession) return;
+		 if (($checkoutSession->payment_status ?? null) !== 'paid') return;
+	 
+		 // Buyer data
+		 $email = $checkoutSession->customer_details->email
+			   ?? ($checkoutSession->customer->email ?? null)
+			   ?? $checkoutSession->customer_email
+			   ?? null;
+	 
+		 $fullName = $checkoutSession->customer_details->name
+				  ?? ($checkoutSession->customer->name ?? null)
+				  ?? ($checkoutSession->shipping->name ?? null)
+				  ?? '';
+	 
+		 if (!$email) {
+			 $this->wire('log')->save(self::LOG_PL, 'No email for session '.$sessionId);
 			 return;
 		 }
-		 
-		 try {
-			 // Retrieve checkout session using the first working key
-			 $checkoutSession = $this->retrieveCheckoutSessionWithKeys($sessionId, $keys);
-			 if (!$checkoutSession) return;
-			 if (($checkoutSession->payment_status ?? null) !== 'paid') return;
 	 
-			 // Buyer data
-			 $email = $checkoutSession->customer_details->email
-				   ?? ($checkoutSession->customer->email ?? null)
-				   ?? $checkoutSession->customer_email
-				   ?? null;
-	 
-			 $fullName = $checkoutSession->customer_details->name
-					  ?? ($checkoutSession->customer->name ?? null)
-					  ?? ($checkoutSession->shipping->name ?? null)
-					  ?? '';
-	 
-			 if (!$email) {
-				 $this->wire('log')->save(self::LOG_PL, 'No email for session '.$sessionId);
-				 return;
-			 }
-	 
-			 // User
-			 $isNewUser = false;
-			 /** @var User $buyer */
-			 $buyer = $users->get("email=" . $sanitizer->email($email));
-			 if (!$buyer || !$buyer->id) {
-				 $isNewUser = true;
-				 $buyer = new User();
-				 $buyer->name  = $sanitizer->pageName($email);
-				 $buyer->email = $email;
-				 $buyer->pass  = bin2hex(random_bytes(8));
-				 $buyer->must_set_password = 1;
-				 if ($fullName) $buyer->title = $fullName;
-				 $users->save($buyer);
-			 } elseif ($fullName && $buyer->title !== $fullName) {
-				 $buyer->of(false);
-				 $buyer->title = $fullName;
-				 $users->save($buyer, ['quiet' => true]);
-			 }
-	 
-			 $this->ensureCustomerRole($buyer);
-	 
+		 // --- NEW: user creation/update via helper ---
+		 $userInfo = $this->createUserFromStripe($email, $fullName);
+		 /** @var User $buyer */
+		 $buyer    = $userInfo['user'];
+		 $isNewUser= $userInfo['isNew'];
+
 			 // Collect products
 			 $lineItems      = (array)($checkoutSession->line_items->data ?? []);
 			 $lines = [];
@@ -1270,7 +1293,49 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			$this->wire('log')->save(self::LOG_PL, 'ensureCustomerRole error: '.$e->getMessage());
 		}
 	}
-
+/**
+	 * Create or update a ProcessWire user based on Stripe checkout session data.
+	 *
+	 * - If a user with the given email exists, update name if changed.
+	 * - If not, create a new user with random password and must_set_password=1.
+	 * - Always ensures the customer role.
+	 *
+	 * @param string $email
+	 * @param string $fullName
+	 * @return array{user:User,isNew:bool} User object and flag if it was newly created
+	 */
+	protected function createUserFromStripe(string $email, string $fullName = ''): array {
+		$users     = $this->wire('users');
+		$sanitizer = $this->wire('sanitizer');
+	
+		$isNewUser = false;
+		/** @var User $buyer */
+		$buyer = $users->get("email=" . $sanitizer->email($email));
+	
+		if (!$buyer || !$buyer->id) {
+			$isNewUser = true;
+			$buyer = new User();
+			$buyer->name  = $sanitizer->pageName($email);
+			$buyer->email = $email;
+			$buyer->pass  = bin2hex(random_bytes(8));
+			if ($buyer->hasField('must_set_password')) {
+				$buyer->must_set_password = 1;
+			}
+			if ($fullName) {
+				$buyer->title = $fullName;
+			}
+			$users->save($buyer);
+		} elseif ($fullName && $buyer->title !== $fullName) {
+			$buyer->of(false);
+			$buyer->title = $fullName;
+			$users->save($buyer, ['quiet' => true]);
+		}
+	
+		$this->ensureCustomerRole($buyer);
+	
+		return ['user' => $buyer, 'isNew' => $isNewUser];
+	}
+	
 	/**
 	 * Creates a new access token for the user and sets its expiry.
 	 *
@@ -1286,4 +1351,29 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		$this->wire('users')->save($user, ['quiet' => true]);
 		return $token;
 	}
-}
+
+	 /**
+	  * Trigger manual sync from config checkbox and reset the flag.
+	  *
+	  * @param array $data Saved config values from Modules::saveConfig hook.
+	  * @return void
+	  */
+	  protected function triggerSyncStripeCustomers(array $data): void {
+		if (empty($data['pl_sync_run'])) return;
+	  
+		try {
+		  require_once __DIR__ . '/includes/PLSyncHelper.php';
+		  $helper = new \ProcessWire\PLSyncHelper($this);
+		  $helper->runSyncFromConfig($data); // schreibt Report in $_SESSION
+		  $this->message('Sync finished – see report below.');
+		  $this->wire('log')->save(self::LOG_PL, '[SYNC] finished');
+		} catch (\Throwable $e) {
+		  $this->error('Sync error: ' . $e->getMessage());
+		  $this->wire('log')->save(self::LOG_PL, '[SYNC ERROR] ' . $e->getMessage());
+		}
+	  
+		// Flag zurücksetzen, damit es nicht erneut läuft
+		$data['pl_sync_run'] = false;
+		$this->modules->saveConfig('StripePaymentLinks', $data);
+	  }
+ }

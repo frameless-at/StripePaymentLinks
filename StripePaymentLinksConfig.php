@@ -36,6 +36,15 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			'brandColor'             => '#0d6efd',
 			'mailHeaderName'         => (string)($cfg->siteName ?? ''),
 			'mailSignatureName'      => (string)($cfg->siteName ?? ''),
+			
+			// Sync Helper
+			'pl_sync_dry_run' => true,
+			'pl_sync_update_existing' => false,
+			'pl_sync_create_missing' => false,
+			'pl_sync_keys' => [],
+			'pl_sync_from' => '',
+			'pl_sync_to' => '',
+			'pl_sync_run' => false,
 		];
 	}
 
@@ -208,6 +217,137 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		
 		$inputfields->add($fsAssets);
 		
+		/** -----------------------
+		 *  Sync (advanced) UI
+		 *  ----------------------*/
+		 $fsSync = $this->modules->get('InputfieldFieldset');
+		 $fsSync->label = 'Sync existing customers';
+		 $fsSync->name  = 'pl_sync';
+		 $fsSync->collapsed = Inputfield::collapsedNo;
+		
+			// Keys multi-select (derived from configured keys; show masked labels)
+			$configuredKeys = [];
+			$raw = $this->get('stripeApiKeys') ?? [];
+			if (is_string($raw)) {
+			  foreach (preg_split('~\R+~', trim($raw)) ?: [] as $k) {
+				$k = trim($k);
+				if ($k !== '') $configuredKeys[] = $k;
+			  }
+			} elseif (is_array($raw)) {
+			  foreach ($raw as $k) {
+				$k = trim((string)$k);
+				if ($k !== '') $configuredKeys[] = $k;
+			  }
+			}
+		
+			$keyOptions = [];
+			foreach ($configuredKeys as $i => $k) {
+			  // mask: sk_live_****last4
+			  $last4 = substr($k, -4);
+			  $prefix = (strpos($k, '_test_') !== false) ? 'TEST' : 'LIVE';
+			  $keyOptions[$i] = $prefix . ' • …' . $last4;
+			}
+		
+			/** @var InputfieldAsmSelect $keys */
+			$keys = $this->modules->get('InputfieldAsmSelect');
+			$keys->attr('name', 'pl_sync_keys');
+			$keys->label = 'Stripe keys to include';
+			$keys->description = 'Leave empty to use ALL configured keys.';
+			$keys->options = $keyOptions;
+			$keys->collapsed = Inputfield::collapsedYes;
+			$keys->columnWidth = 33;
+			$fsSync->add($keys);
+		
+			// From / To
+			/** @var InputfieldDatetime $from */
+			$from = $this->modules->get('InputfieldDatetime');
+			$from->name  = 'pl_sync_from';
+			$from->label = 'From (optional)';
+			$from->description = 'Pick a starting date (server time).';
+			$from->columnWidth = 33;
+			$from->datepicker = 1;   // falls Property existiert: Kalender an
+			$from->timepicker = 0;   // falls Property existiert: Zeit aus
+			$from->attr('placeholder', 'YYYY-MM-DD');
+			$fsSync->add($from);
+			
+			/** @var InputfieldDatetime $to */
+			$to = $this->modules->get('InputfieldDatetime');
+			$to->name  = 'pl_sync_to';
+			$to->label = 'To (optional)';
+			$to->description = 'Pick an end date (server time).';
+			$to->columnWidth = 33;
+			$to->datepicker = 1;
+			$to->timepicker = 0;
+			$to->attr('placeholder', 'YYYY-MM-DD');
+			$fsSync->add($to);
+			
+			// Dry run (default ON)
+			/** @var InputfieldCheckbox $dry */
+			$dry = $this->modules->get('InputfieldCheckbox');
+			$dry->attr('name', 'pl_sync_dry_run');
+			$dry->label = 'Test it (no writes)';
+			$dry->description = 'If checked, the sync only logs what it would do (no DB writes).';
+			$dry->checked = (bool)$this->get('pl_sync_dry_run');
+			$dry->columnWidth = 33;
+			$fsSync->add($dry);
+		
+			// Update existing
+			/** @var InputfieldCheckbox $upd */
+			$upd = $this->modules->get('InputfieldCheckbox');
+			$upd->attr('name', 'pl_sync_update_existing');
+			$upd->label = 'Update existing purchase items';
+			$upd->description = 'If a purchase for the same session_id exists, refresh its content/meta.';
+			$upd->checked = (bool)$this->get('pl_sync_update_existing');
+			$upd->columnWidth = 33;
+			$fsSync->add($upd);
+		
+			// Create missing users
+			/** @var InputfieldCheckbox $mkUser */
+			$mkUser = $this->modules->get('InputfieldCheckbox');
+			$mkUser->attr('name', 'pl_sync_create_missing');
+			$mkUser->label = 'Create missing users';
+			$mkUser->description = 'If no user matches the checkout email, create one and set role customer.';
+			$mkUser->checked = $this->get('pl_sync_create_missing');
+			$mkUser->columnWidth = 33;
+			$fsSync->add($mkUser);
+		
+			/** @var InputfieldCheckbox $run */
+			$run = $this->modules->get('InputfieldCheckbox');
+			$run->attr('name', 'pl_sync_run');
+			$run->label = 'Sync now';
+			$run->description = 'Make shure you want to run this kind of sync. Read the Notes -->';
+			$run->checked = $this->get('pl_sync_run');
+			$run->columnWidth = 33;
+			$fsSync->add($run);
+		
+			// Helper notes (read-only)
+			/** @var InputfieldMarkup $notes */
+			$notes = $this->modules->get('InputfieldMarkup');
+			$notes->attr('name', 'pl_sync_notes');
+			$notes->label = 'Notes';
+			$notes->columnWidth = 66;
+
+			$notes->value =
+			  '<p class="notes">' .
+			  'Use this tool for special cases only: migrating historical purchases, adding an additional Stripe account ' .
+			  'with existing sales, or recovery after outages. Always start with a DRY RUN.' .
+			  '</p>';
+			$fsSync->add($notes);
+			
+			$report = $this->wire('session')->get('pl_sync_report');
+			if ($report) {
+				/** @var InputfieldMarkup $out */
+				$out = $this->modules->get('InputfieldMarkup');
+				$out->attr('name', 'pl_sync_report');
+				$out->label = 'Sync report';
+				$out->value = '<pre style="white-space:pre-wrap;max-height:400px;overflow:auto;margin:0">'
+							. htmlspecialchars((string)$report, ENT_QUOTES, 'UTF-8')
+							. '</pre>';
+				$fsSync->add($out);
+				$this->wire('session')->remove('pl_sync_report');
+			}
+			$inputfields->add($fsSync);
+
 		return $inputfields;
 	}
 }
