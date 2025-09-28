@@ -118,7 +118,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		$fsMail = $this->modules->get('InputfieldFieldset');
 		$fsMail->label = 'Mail defaults & branding';
 		$fsMail->name  = 'pl_mail_branding';
-		$fsMail->collapsed = Inputfield::collapsedNo;
+		$fsMail->collapsed = Inputfield::collapsedYes;
 
 		// Mail layout path
 		$tplPath = $this->modules->get('InputfieldText');
@@ -190,7 +190,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		$fsAssets = $this->modules->get('InputfieldFieldset');
 		$fsAssets->label = 'Frontend assets';
 		$fsAssets->name  = 'pl_frontend_assets';
-		$fsAssets->collapsed = Inputfield::collapsedNo;
+		$fsAssets->collapsed = Inputfield::collapsedYes;
 		
 		$auto = $this->modules->get('InputfieldCheckbox');
 		$auto->name  = 'autoLoadBootstrap';
@@ -223,7 +223,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		 $fsSync = $this->modules->get('InputfieldFieldset');
 		 $fsSync->label = 'Sync existing customers';
 		 $fsSync->name  = 'pl_sync';
-		 $fsSync->collapsed = Inputfield::collapsedNo;
+		 $fsSync->collapsed = Inputfield::collapsedYes;
 		
 			// Keys multi-select (derived from configured keys; show masked labels)
 			$configuredKeys = [];
@@ -285,7 +285,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			/** @var InputfieldCheckbox $dry */
 			$dry = $this->modules->get('InputfieldCheckbox');
 			$dry->attr('name', 'pl_sync_dry_run');
-			$dry->label = 'Test it (no writes)';
+			$dry->label = 'Test mode (no writes)';
 			$dry->description = 'If checked, the sync only logs what it would do (no DB writes).';
 			$dry->checked = (bool)$this->get('pl_sync_dry_run');
 			$dry->columnWidth = 33;
@@ -330,7 +330,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			$notes->value =
 			  '<p class="notes">' .
 			  'Use this tool for special cases only: migrating historical purchases, adding an additional Stripe account ' .
-			  'with existing sales, or recovery after outages. Always start with a DRY RUN.' .
+			  'with existing sales, or recovery after outages. Before writing make a DB-Backup and always start with a TEST RUN.' .
 			  '</p>';
 			$fsSync->add($notes);
 			
@@ -344,6 +344,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 							. htmlspecialchars((string)$report, ENT_QUOTES, 'UTF-8')
 							. '</pre>';
 				$fsSync->add($out);
+			
 				$this->wire('session')->remove('pl_sync_report');
 			}
 			$inputfields->add($fsSync);
