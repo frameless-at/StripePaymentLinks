@@ -157,24 +157,6 @@ final class PLSyncHelper extends Wire {
 	$report[] = '';
 	return true;
   }
-
-
-/**
- * List first page of sessions for a single key (debug/report helper).
- *
- * @param string        $apiKey
- * @param array<string,mixed> $params
- * @param array<string> $report
- * @return void
- */
-  private function listFirstPageForKey(string $apiKey, array $params, array &$report): void {
-	\Stripe\Stripe::setApiKey($apiKey);
-	$page = \Stripe\Checkout\Session::all($params);
-	$data = (is_object($page) && isset($page->data) && is_array($page->data)) ? $page->data : [];
-	$report[] = sprintf('Key (%s): sessions=%d%s', $this->maskKey($apiKey), count($data), (!empty($page->has_more) ? ' (has_more)' : ''));
-	$max = min(5, count($data));
-	for ($i=0; $i<$max; $i++) $this->reportSessionRow($data[$i], $report);
-  }
   
   /**
  * Fetch all sessions for a key with pagination and optional date filter.
@@ -671,178 +653,152 @@ private function reportSessionRow($s, array &$report): void {
 	}
   }
   
-/* ========= Public: run ========= */
+  /**
+   * Check whether a Stripe session belongs to the given buyer email.
+   *
+   * @param object $s
+   * @param string $target normalized (lowercased) email
+   * @return bool
+   */
+  private function sessionMatchesEmail($s, string $target): bool {
+	$e1 = strtolower(trim((string)($this->g($s, ['customer_details','email']) ?? '')));
+	$e2 = strtolower(trim((string)($this->g($s, ['customer_email']) ?? '')));
+	return ($e1 && $e1 === $target) || ($e2 && $e2 === $target);
+  }
+	
 /**
- * Sync only sessions that belong to a specific buyer email.
- *
- * Reuses the same flow as runSyncFromConfig(), but filters sessions to those
- * whose customer email matches $targetEmail (case-insensitive).
- *
- * @param array  $cfg         Saved module config (same structure as runSyncFromConfig()).
- * @param string $targetEmail Email address to sync (e.g. "user@example.com").
- * @return void
- */
- public function runSyncForEmail(array $cfg, string $targetEmail): void {
-   $log = $this->wire('log'); $ses = $this->wire('session');
-   $__tAll = $this->t0();
-   $target = strtolower(trim($targetEmail));
-   if ($target === '') {
-	 $ses->set('pl_sync_report', "Invalid email.\n");
-	 return;
-   }
- 
-   // Optionen
-   $allKeys = $this->splitKeys($cfg['stripeApiKeys'] ?? '');
-   $useKeys = $this->selectKeys($allKeys, (array)($cfg['pl_sync_keys'] ?? []));
-   $fromTs  = (int)($cfg['pl_sync_from'] ?? 0);
-   $toTs    = (int)($cfg['pl_sync_to']   ?? 0);
-   $dry     = (bool)($cfg['pl_sync_dry_run'] ?? true);
-   $upd     = (bool)($cfg['pl_sync_update_existing'] ?? false);
-   $mkUsr   = (bool)($cfg['pl_sync_create_missing'] ?? false);
-   [$fromTs, $toTs] = $this->normalizeDateRange($fromTs, $toTs);
- 
-   // Runtime-Flags
-   $this->optDry            = $dry;
-   $this->optUpdateExisting = $upd;
-   $this->optCreateMissing  = $mkUsr;
- 
-   // Report-Header
-   $r = [];
-   $r[] = '== StripePaymentLinks: Sync (email-targeted) ==';
-   $r[] = 'Email: ' . $targetEmail;
-   $r[] = 'Mode: ' . ($dry ? 'DRY RUN (no writes)' : 'WRITE');
-   $r[] = 'Update existing: ' . ($upd ? 'yes' : 'no');
-   $r[] = 'Create missing users: ' . ($mkUsr ? 'yes' : 'no');
-   $r[] = 'Keys configured: ' . count($allKeys);
-   $r[] = 'Keys selected:   ' . count($useKeys);
-   if ($useKeys) { $r[] = 'Selected keys:'; foreach ($useKeys as $k) $r[] = '  - ' . $this->maskKey($k); }
-   $r[] = 'From: ' . ($fromTs ? date('Y-m-d', $fromTs) : '—');
-   $r[] = 'To:   ' . ($toTs   ? date('Y-m-d', $toTs)   : '—');
-   $r[] = '';
- 
-   if (!$useKeys) { $r[] = 'No API keys → abort.'; $ses->set('pl_sync_report', implode("\n",$r)); return; }
-   if (!$this->ensureStripe($ses, $r)) return;
- 
-   $matched = 0; $scanned = 0;
- 
-   foreach ($useKeys as $key) {
-	 try {
-	   $tList  = $this->t0();
-	   $all    = $this->fetchSessionsForKey($key, $fromTs, $toTs);
-	   $listMs = $this->ms($tList);
- 
-	   $scanned += count($all);
-	   $r[] = sprintf('Key (%s): scanned=%d  ⏱ list=%dms', $this->maskKey($key), count($all), $listMs);
- 
-	   foreach ($all as $s) {
-		 if ($this->sessionMatchesEmail($s, $target)) {
-		   $matched++;
-		   $this->reportSessionRow($s, $r); // enthält create/update flow
-		 }
-	   }
-	 } catch (\Throwable $e) {
-	   $r[] = '  [Stripe error] ' . $e->getMessage();
-	   $log->save(\ProcessWire\StripePaymentLinks::LOG_PL, '[SYNC email] stripe error: ' . $e->getMessage());
-	 }
-   }
- 
-   $r[] = '';
-   $r[] = 'Total scanned: ' . $scanned;
-   $r[] = 'Total matched for ' . $targetEmail . ': ' . $matched;
-   $__totalMs = $this->ms($__tAll);
-   $r[] = 'Total duration: ' . $this->fmtDuration($__totalMs);
-   $r[] = $this->optDry ? 'Done (read-only).' : 'Done (writes applied when needed).';
- 
-   $ses->set('pl_sync_report', implode("\n", $r));
- }
- 
+   * Parse module config into normalized options.
+   *
+   * @param array $cfg
+   * @return array{keys:array,from:int,to:int,dry:bool,upd:bool,mkUsr:bool}
+   */
+  private function parseOptions(array $cfg): array {
+	$allKeys = $this->splitKeys($cfg['stripeApiKeys'] ?? '');
+	$useKeys = $this->selectKeys($allKeys, (array)($cfg['pl_sync_keys'] ?? []));
+	$fromTs  = (int)($cfg['pl_sync_from'] ?? 0);
+	$toTs    = (int)($cfg['pl_sync_to']   ?? 0);
+	[$fromTs, $toTs] = $this->normalizeDateRange($fromTs, $toTs);
+	return [
+	  'keys' => $useKeys,
+	  'from' => $fromTs,
+	  'to'   => $toTs,
+	  'dry'  => (bool)($cfg['pl_sync_dry_run'] ?? true),
+	  'upd'  => (bool)($cfg['pl_sync_update_existing'] ?? false),
+	  'mkUsr'=> (bool)($cfg['pl_sync_create_missing'] ?? false),
+	];
+  }
 
-/**
- * Check whether a Stripe session belongs to the given buyer email.
- *
- * @param object $s
- * @param string $target normalized (lowercased) email
- * @return bool
- */
-private function sessionMatchesEmail($s, string $target): bool {
-  $e1 = strtolower(trim((string)($this->g($s, ['customer_details','email']) ?? '')));
-  $e2 = strtolower(trim((string)($this->g($s, ['customer_email']) ?? '')));
-  return ($e1 && $e1 === $target) || ($e2 && $e2 === $target);
-}
-/**
- * Entry point from the module config UI. Reads options, ensures Stripe SDK,
- * paginates all sessions for selected keys within the date range, and runs
- * the per-session logic (report + writes depending on dry-run).
- *
- * @param array<string,mixed> $cfg Saved module config.
- * @return void
- */
-public function runSyncFromConfig(array $cfg): void {
-   $log = $this->wire('log'); $ses = $this->wire('session');
-   $__tAll = $this->t0();
-   // Falls eine Ziel-Email gesetzt ist → delegieren
-   $emailTarget = trim((string)($cfg['pl_sync_email'] ?? ''));
-   if ($emailTarget !== '') {
-	 $this->runSyncForEmail($cfg, $emailTarget);
-	 return;
-   }
- 
-   $allKeys = $this->splitKeys($cfg['stripeApiKeys'] ?? '');
-   $useKeys = $this->selectKeys($allKeys, (array)($cfg['pl_sync_keys'] ?? []));
-   $fromTs  = (int)($cfg['pl_sync_from'] ?? 0);
-   $toTs    = (int)($cfg['pl_sync_to']   ?? 0);
-   [$fromTs, $toTs] = $this->normalizeDateRange($fromTs, $toTs);
- 
-   $dry     = (bool)($cfg['pl_sync_dry_run'] ?? true);
-   $upd     = (bool)($cfg['pl_sync_update_existing'] ?? false);
-   $mkUsr   = (bool)($cfg['pl_sync_create_missing'] ?? false);
- 
-   $this->optDry            = $dry;
-   $this->optUpdateExisting = $upd;
-   $this->optCreateMissing  = $mkUsr;
- 
-   $r = [];
-   $r[] = '== StripePaymentLinks: Sync (dry report) ==';
-   $r[] = 'Mode: ' . ($dry ? 'DRY RUN (no writes)' : 'WRITE');
-   $r[] = 'Update existing: ' . ($upd ? 'yes' : 'no');
-   $r[] = 'Create missing users: ' . ($mkUsr ? 'yes' : 'no');
-   $r[] = 'Keys configured: ' . count($allKeys);
-   $r[] = 'Keys selected:   ' . count($useKeys);
-   if ($useKeys) { $r[] = 'Selected keys:'; foreach ($useKeys as $k) $r[] = '  - ' . $this->maskKey($k); }
-   $r[] = 'From: ' . ($fromTs ? date('Y-m-d', $fromTs) : '—');
-   $r[] = 'To:   ' . ($toTs   ? date('Y-m-d', $toTs)   : '—');
- 
-   if (!$useKeys) { $r[] = ''; $r[] = 'No API keys → abort.'; $ses->set('pl_sync_report', implode("\n",$r)); return; }
-   if (!$this->ensureStripe($ses, $r)) return;
- 
-   $r[] = 'Querying Stripe (full pagination per key)…';
- 
-   $total = 0;
-   foreach ($useKeys as $key) {
-	 try {
-	   $tList  = $this->t0();
-	   $all    = $this->fetchSessionsForKey($key, $fromTs, $toTs);
-	   $listMs = $this->ms($tList);
- 
-	   $total += count($all);
-	   $r[] = sprintf('Key (%s): sessions=%d  ⏱ list=%dms', $this->maskKey($key), count($all), $listMs);
- 
-	   foreach ($all as $s) {
-		 $this->reportSessionRow($s, $r);
+  /**
+   * Build standard report header.
+   *
+   * @param array $cfg
+   * @param array $opts
+   * @param string $title
+   * @param string|null $emailTarget
+   * @return array<string>
+   */
+  private function buildReportHeader(array $cfg, array $opts, string $title, ?string $emailTarget): array {
+	$allKeys = $this->splitKeys($cfg['stripeApiKeys'] ?? '');
+	$r = [];
+	$r[] = "== StripePaymentLinks: $title ==";
+	if ($emailTarget !== null) $r[] = 'Email: ' . $emailTarget;
+	$r[] = 'Mode: ' . ($opts['dry'] ? 'DRY RUN (no writes)' : 'WRITE');
+	$r[] = 'Update existing: ' . ($opts['upd'] ? 'yes' : 'no');
+	$r[] = 'Create missing users: ' . ($opts['mkUsr'] ? 'yes' : 'no');
+	if ($opts['keys']) { 
+	  $r[] = 'Selected keys:'; 
+	  foreach ($opts['keys'] as $k) $r[] = '  - ' . $this->maskKey($k);
+	}
+	$r[] = 'From: ' . ($opts['from'] ? date('Y-m-d', $opts['from']) : '—');
+	$r[] = 'To:   ' . ($opts['to']   ? date('Y-m-d', $opts['to'])   : '—');
+	$r[] = '';
+	return $r;
+  }
+/* ========= Public: run ========= */
+
+  /**
+   * Core sync: optionally filter sessions by email.
+   *
+   * @param array $cfg
+   * @param string|null $emailTarget normalized or raw email; null = no filtering
+   * @return void
+   */
+public function runSync(array $cfg, ?string $emailTarget = null): void {
+	 $log = $this->wire('log'); $ses = $this->wire('session');
+	 $__tAll = $this->t0();
+   
+	 $opts = $this->parseOptions($cfg);
+   
+	 // runtime flags
+	 $this->optDry            = $opts['dry'];
+	 $this->optUpdateExisting = $opts['upd'];
+	 $this->optCreateMissing  = $opts['mkUsr'];
+   
+	 $title = ($opts['dry']) ? 'Sync (TEST RUN)' : 'Sync';
+	 $r = $this->buildReportHeader($cfg, $opts, $title, $emailTarget);
+   
+	 if (!$opts['keys']) { $r[] = 'No API keys → abort.'; $ses->set('pl_sync_report', implode("\n", $r)); return; }
+	 if (!$this->ensureStripe($ses, $r)) return;
+   
+	 // normalize target email once
+	 $target = ($emailTarget !== null) ? strtolower(trim($emailTarget)) : null;
+   
+	 $matched = 0; $scanned = 0; $total = 0;
+   
+	 foreach ($opts['keys'] as $key) {
+	   try {
+		 $tList  = $this->t0();
+		 $all    = $this->fetchSessionsForKey($key, $opts['from'], $opts['to']);
+		 $listMs = $this->ms($tList);
+   
+		 $scanned += count($all);
+		 $total   += count($all);
+   
+		 $prefix = ($target !== null) ? 'scanned' : 'sessions';
+		 $r[] = sprintf('Key (%s): %s=%d  ⏱ list=%dms', $this->maskKey($key), $prefix, count($all), $listMs);
+   
+		 foreach ($all as $s) {
+		   if ($target !== null && !$this->sessionMatchesEmail($s, $target)) continue;
+		   if ($target !== null) $matched++;
+		   $this->reportSessionRow($s, $r);
+		 }
+   
+	   } catch (\Throwable $e) {
+		 $r[] = '  [Stripe error] ' . $e->getMessage();
+		 $log->save(\ProcessWire\StripePaymentLinks::LOG_PL, '[SYNC core] stripe error: ' . $e->getMessage());
 	   }
-	 } catch (\Throwable $e) {
-	   $r[] = '  [Stripe error] ' . $e->getMessage();
-	   $log->save(\ProcessWire\StripePaymentLinks::LOG_PL, '[SYNC] stripe error: ' . $e->getMessage());
 	 }
+   
+	 if ($target !== null) {
+	   $r[] = '';
+	   $r[] = 'Total scanned: ' . $scanned;
+	   $r[] = 'Total matched for ' . $emailTarget . ': ' . $matched;
+	 } else {
+	   $r[] = 'Total sessions found (all pages): ' . $total;
+	 }
+   
+	 $__totalMs = $this->ms($__tAll);
+	 $r[] = 'Total duration: ' . $this->fmtDuration($__totalMs);
+	 $r[] = $this->optDry ? 'Done (read-only).' : 'Done (writes applied when needed).';
+   
+	 $ses->set('pl_sync_report', implode("\n", $r));
    }
- 
- 	$r[] = 'Total sessions found (all pages): ' . $total;
-   $__totalMs = $this->ms($__tAll);
-   $r[] = 'Total duration: ' . $this->fmtDuration($__totalMs);
-   $r[] = $this->optDry ? 'Pagination OK. (read-only)' : 'Pagination OK. (writes applied when needed)';
- 
-   $ses->set('pl_sync_report', implode("\n",$r));
-   $log->save(\ProcessWire\StripePaymentLinks::LOG_PL, '[SYNC] listed first pages (read-only)');
- }
+   
+  /**
+   * Backward-compatible wrapper: full sync (no email filter).
+   */
+  public function runSyncFromConfig(array $cfg): void {
+	// Respect pl_sync_email if present, but delegieren zentral
+	$emailTarget = trim((string)($cfg['pl_sync_email'] ?? ''));
+	$this->runSync($cfg, $emailTarget !== '' ? $emailTarget : null);
+  }
+
+  /**
+   * Backward-compatible wrapper: email-targeted sync.
+   */
+  public function runSyncForEmail(array $cfg, string $targetEmail): void {
+	$this->runSync($cfg, $targetEmail);
+  }
+  	
  
 }
