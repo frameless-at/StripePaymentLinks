@@ -1,12 +1,12 @@
 # StripePaymentLinks
 
-Lightweight ProcessWire module to handle [Stripe Checkout Payment Links](https://docs.stripe.com/payments/no-code).  
+Lightweight ProcessWire module to handle [Stripe Checkout Payment Links](https://stripe.com/docs/payments/checkout/payment-links).  
 It takes care of:
 
 - Handling the **Stripe redirect (success URL)**  
 - Creating or updating the **user account**  
 - Recording **purchases** in a repeater field  
-- Issuing **access links** for products that require login  
+- Issuing **access links** for products that require login**  
 - Sending **branded access mails**  
 - Rendering **Bootstrap modals** for login, reset, and set-password flows  
 
@@ -43,6 +43,14 @@ The module is designed for small e-commerce or membership scenarios where a full
   - Force password set after purchase  
   - Notices (expired access, already purchased, reset expired)  
 
+- **Synchronization (Sync Helper)**  
+  - CLI/admin helper to **synchronize Stripe Checkout sessions** into ProcessWire users  
+  - Supports **dry-run mode** (no writes, for inspection only)  
+  - Options for **update existing purchases** and **create missing users**  
+  - Date range filters (`from`, `to`)  
+  - Optional **email filter** to sync sessions for one user only  
+  - Generates a plain-text **report** with all actions (LINKED, CREATE, UPDATE, SKIP) and line items  
+
 - **Internationalization (i18n)**  
   - All strings are pulled from `defaultTexts()` using `$this->_()`  
   - No hardcoded UI strings in templates or services  
@@ -76,12 +84,11 @@ The module is designed for small e-commerce or membership scenarios where a full
    https://example.com/thank-you/?session_id={CHECKOUT_SESSION_ID}
    ```
 
-2. On your product pages templates the module added one field and two checkboxes:
-  - stripe_product_id
+2. On your product pages templates the module added two checkboxes:
   - requires_access
   - allow_multiple_purchases
   
-Copy the product ids from stripe and check/uncheck the checkboxes on your product pages as needed
+  Check/uncheck them on your product pages as needed.
   
 3. In ProcessWire templates, call the module’s render method:
 
@@ -90,10 +97,31 @@ Copy the product ids from stripe and check/uncheck the checkboxes on your produc
    ```
 
   - On the thank-you page, the module will display an access buttons block if the checkout contained products that require access.
-   - On delivery/product pages marked with requires_access, users are gated: if they are not logged in or have not purchased, they are redirected to the sales page and prompted to log in.
-   - After first purchase, new users will see the set-password modal on the delivery page.
-   - Access summary emails are sent automatically according to the configured policy (never, newUsersOnly, or always).
+  - On delivery/product pages marked with requires_access, users are gated: if they are not logged in or have not purchased, they are redirected to the sales page and prompted to log in.
+  - After first purchase, new users will see the set-password modal on the delivery page.
+  - Access summary emails are sent automatically according to the configured policy (never, newUsersOnly, or always).
 
+---
+
+## Synchronization / Sync Helper
+
+For advanced scenarios (e.g. when purchases were made outside the normal flow, or to backfill history), the module provides a **Sync Helper**:
+
+- Run via **module config** or CLI.  
+- Fetches Stripe Checkout Sessions via API and writes them into the `purchases` repeater.  
+- **Options**:  
+  - **Dry Run** → simulate sync, only produce a report (no writes).  
+  - **Update Existing** → overwrite already linked purchases.  
+  - **Create Missing Users** → auto-create new users if no account exists for the checkout email.  
+  - **Date Filters** → limit sessions by `from` and/or `to` date.  
+  - **Email Filter** → restrict sync to a single customer.  
+
+The sync produces a **plain-text report** with:  
+- Session ID, date, customer email  
+- Status: `LINKED`, `MISSING`, `CREATE`, `UPDATE`, `SKIP`  
+- Line items with product ID, quantity, name, amount  
+
+This makes it easy to audit or re-import purchases safely.
 
 ---
 
@@ -104,6 +132,8 @@ Copy the product ids from stripe and check/uncheck the checkboxes on your produc
 - **Access mail policy** (`never`, `newUsersOnly`, `always`)
 - **Magic link TTL in minutes**
 - **Mail branding** (logo, color, from name, signature, etc.)
+- **Sync options** (dry-run, update existing, create missing users, date range, email filter)
+
 ---
 
 ## Optional: Bootstrap via CDN
@@ -112,12 +142,12 @@ The module’s modal dialogs and access UI are styled with **Bootstrap 5**.
 If your site does not already include Bootstrap, you have two options:
 
 1. **Automatic inclusion (recommended for quick setup)**  
-   In the module configuration, enable **“Load Bootstrap 5 from CDN”**. The module will then insert css and js assets automatically into your frontend
+   In the module configuration, enable **“Load Bootstrap 5 from CDN”**. The module will then insert css and js assets automatically into your frontend.
 
 This ensures the module’s modals, buttons, and notices render correctly, even if your site does not already use Bootstrap.
 
-2.	**Manual inclusion**
-  If your frontend already includes Bootstrap (from your theme or build pipeline), you can leave the config option disabled. No additional assets will be injected, avoiding duplicates.
+2. **Manual inclusion**  
+   If your frontend already includes Bootstrap (from your theme or build pipeline), you can leave the config option disabled. No additional assets will be injected, avoiding duplicates.
 
 ---
 
@@ -129,6 +159,8 @@ This ensures the module’s modals, buttons, and notices render correctly, even 
 - Access control uses `hasPurchasedProduct($user, $product)`.
 - Modals are rendered via `ModalRenderer.php` with a clean Bootstrap view.
 - Texts are centralized in `defaultTexts()` and must be accessed with `mt()` / `t()`.
+- **Sync Helper** (`PLSyncHelper`) implements the same persistence logic as checkout.  
+  It ensures that data structure in `spl_purchases` is identical whether created live or via sync.
 
 ---
 
