@@ -42,6 +42,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			'pl_sync_update_existing' => false,
 			'pl_sync_create_missing' => false,
 			'pl_sync_keys' => [],
+			'pl_sync_email' => '',
 			'pl_sync_from' => '',
 			'pl_sync_to' => '',
 			'pl_sync_run' => false,
@@ -255,9 +256,20 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			$keys->description = 'Leave empty to use ALL configured keys.';
 			$keys->options = $keyOptions;
 			$keys->collapsed = Inputfield::collapsedYes;
-			$keys->columnWidth = 33;
 			$fsSync->add($keys);
-		
+			
+			/** Email filter for targeted sync (optional) */
+			/** @var \ProcessWire\InputfieldEmail $f */
+			$f = $this->modules->get('InputfieldText');
+			$f->name  = 'pl_sync_email';
+			$f->label = $this->_('Limit to this buyer email (optional)');
+			$f->description = $this->_('Leave empty to sync all.');
+			$f->notes = $this->_('If set, the sync will only consider Stripe sessions whose customer email matches this address.');
+			$f->columnWidth = 33;
+			$f->placeholder = 'user@example.com';
+			$f->required = false;
+			$fsSync->add($f);
+			
 			// From / To
 			/** @var InputfieldDatetime $from */
 			$from = $this->modules->get('InputfieldDatetime');
@@ -315,24 +327,10 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			$run = $this->modules->get('InputfieldCheckbox');
 			$run->attr('name', 'pl_sync_run');
 			$run->label = 'Sync now';
-			$run->description = 'Make shure you want to run this kind of sync. Read the Notes -->';
+			$run->description = 'Use this tool for special cases only: migrating historical purchases, adding an additional Stripe account with existing sales, or recovery after outages. Before writing make a DB-Backup and always start with a TEST RUN.';
 			$run->checked = $this->get('pl_sync_run');
-			$run->columnWidth = 33;
 			$fsSync->add($run);
 		
-			// Helper notes (read-only)
-			/** @var InputfieldMarkup $notes */
-			$notes = $this->modules->get('InputfieldMarkup');
-			$notes->attr('name', 'pl_sync_notes');
-			$notes->label = 'Notes';
-			$notes->columnWidth = 66;
-
-			$notes->value =
-			  '<p class="notes">' .
-			  'Use this tool for special cases only: migrating historical purchases, adding an additional Stripe account ' .
-			  'with existing sales, or recovery after outages. Before writing make a DB-Backup and always start with a TEST RUN.' .
-			  '</p>';
-			$fsSync->add($notes);
 			
 			$report = $this->wire('session')->get('pl_sync_report');
 			if ($report) {
