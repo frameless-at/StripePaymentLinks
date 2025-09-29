@@ -49,6 +49,11 @@ final class PLSyncHelper extends Wire {
 	/** Milliseconds since $t0. */
 	private function ms(float $t0): int { return (int) round((microtime(true) - $t0) * 1000); }
 	
+	/** Format milliseconds as human-readable duration. */
+	private function fmtDuration(int $ms): string {
+	  return ($ms < 1000) ? ($ms . 'ms') : (number_format($ms / 1000, 2, '.', '') . 's');
+	}
+	
 	/**
 	 * Safe getter for nested object/array paths.
 	 *
@@ -103,20 +108,6 @@ final class PLSyncHelper extends Wire {
  */
   private function maskKey(string $k): string {
 	return (strpos($k, '_test_') !== false ? 'TEST' : 'LIVE') . ' • …' . substr($k, -4);
-  }
-
-  /**
- * Build Stripe 'created' filter array from timestamps.
- *
- * @param int $fromTs
- * @param int $toTs
- * @return array
- */
-  private function createdFilterParams(int $fromTs, int $toTs): array {
-	$c = [];
-	if ($fromTs) $c['gte'] = $fromTs;
-	if ($toTs)   $c['lte'] = $toTs;
-	return $c ? ['created' => $c] : [];
   }
 
 /**
@@ -241,44 +232,51 @@ private function reportSessionRow($s, array &$report): void {
    $status   = ($u && $linkedId) ? 'LINKED' : 'MISSING';
    $report[] = '      ['.$status.'] ' . $email;
  
-   // --- Line items timing ---
-   $tItems = $this->t0();
+   // --- Single-call: expanded session (includes line_items) ---
+   $tExpand = $this->t0();
+   $expanded = $this->retrieveExpandedSession($sid);
+   $expandMs = $this->ms($tExpand);
+   $report[] = sprintf('      ⏱ expand=%dms', $expandMs);
+ 
+   if (!$expanded) { $report[] = '      [expand error] empty session'; return; }
+ 
+   // Line items aus der expanded Session verwenden
    $lines = []; $productIds = []; $compact = [];
+   $items  = $this->g($expanded, ['line_items']); // Stripe list object mit ->data
+   if (!$items) {
+	 // (selten) Fallback: einzeln nachladen
+	 $tItems = $this->t0();
+	 try {
+	   $items = $this->fetchLineItems($sid);
+	 } catch (\Throwable $e) {
+	   $report[] = '      [line-items error] ' . $e->getMessage();
+	   return;
+	 }
+	 $report[] = sprintf('      ⏱ items=%dms (fallback)', $this->ms($tItems));
+   }
+ 
    try {
-	 $items = $this->fetchLineItems($sid);
-	 [$lines, $productIds, $compact] = $this->buildLinesMetaFromStripeItems($items, (string)($s->currency ?? 'EUR'));
+	 [$lines, $productIds, $compact] = $this->buildLinesMetaFromStripeItems($items, (string)($expanded->currency ?? 'EUR'));
 	 foreach ($lines as $L) $report[] = '      ' . $L;
 	 $report[] = '      product_ids: [' . implode(', ', array_map('intval', $productIds)) . ']';
 	 $report[] = '      stripe_line_items: ' . count($compact);
    } catch (\Throwable $e) {
-	 $report[] = '      [line-items error] ' . $e->getMessage();
+	 $report[] = '      [line-items build error] ' . $e->getMessage();
 	 return;
    }
-   $itemsMs = $this->ms($tItems);
-   $report[] = sprintf('      ⏱ items=%dms', $itemsMs);
  
-   // --- User creation path remains identical ---
+   // User ggf. anlegen (unverändert)
    if (!$u) {
 	 if (!$this->optCreateMissing) { $report[] = '      ⇒ action: SKIP (user missing)'; return; }
-	 $fullName = (string)($this->g($s, ['customer_details','name']) ?? '');
+	 $fullName = (string)($this->g($expanded, ['customer','name']) ?? $this->g($expanded, ['customer_details','name']) ?? '');
 	 if ($this->optDry) { $report[] = '      ⇒ action: CREATE (user) + CREATE (purchase)'; return; }
 	 $u = $this->createUserLikeModule($email, $fullName);
 	 if (!$u || !$u->id) { $report[] = '      [WRITE ERROR] could not create user'; return; }
    }
  
-   // --- Expanded session timing ---
-   $tExpand = $this->t0();
-   $sessionForPersist = null;
-   try {
-	 $expanded = $this->retrieveExpandedSession($sid);
-	 $sessionForPersist = $expanded ?: $s;
-   } catch (\Throwable $e) {
-	 $sessionForPersist = $s;
-   }
-   $expandMs = $this->ms($tExpand);
-   $report[] = sprintf('      ⏱ expand=%dms', $expandMs);
+   // Persist (Session für Meta = expanded)
+   $sessionForPersist = $expanded;
  
-   // --- Persist timings (only if not dry) ---
    if ($linkedId) {
 	 if ($this->optUpdateExisting) {
 	   $report[] = '      ⇒ action: UPDATE purchase #' . (int)$linkedId;
@@ -307,8 +305,7 @@ private function reportSessionRow($s, array &$report): void {
 	   $report[] = sprintf('      ⏱ write=%dms', $this->ms($tWrite));
 	 }
    }
- }  
-
+ }
 /**
  * Fetch line items for a given Stripe Checkout Session.
  *
@@ -687,7 +684,7 @@ private function reportSessionRow($s, array &$report): void {
  */
  public function runSyncForEmail(array $cfg, string $targetEmail): void {
    $log = $this->wire('log'); $ses = $this->wire('session');
- 
+   $__tAll = $this->t0();
    $target = strtolower(trim($targetEmail));
    if ($target === '') {
 	 $ses->set('pl_sync_report', "Invalid email.\n");
@@ -750,8 +747,10 @@ private function reportSessionRow($s, array &$report): void {
    }
  
    $r[] = '';
-   $r[] = "Total scanned: $scanned";
-   $r[] = "Total matched for {$targetEmail}: $matched";
+   $r[] = 'Total scanned: ' . $scanned;
+   $r[] = 'Total matched for ' . $targetEmail . ': ' . $matched;
+   $__totalMs = $this->ms($__tAll);
+   $r[] = 'Total duration: ' . $this->fmtDuration($__totalMs);
    $r[] = $this->optDry ? 'Done (read-only).' : 'Done (writes applied when needed).';
  
    $ses->set('pl_sync_report', implode("\n", $r));
@@ -780,7 +779,7 @@ private function sessionMatchesEmail($s, string $target): bool {
  */
 public function runSyncFromConfig(array $cfg): void {
    $log = $this->wire('log'); $ses = $this->wire('session');
- 
+   $__tAll = $this->t0();
    // Falls eine Ziel-Email gesetzt ist → delegieren
    $emailTarget = trim((string)($cfg['pl_sync_email'] ?? ''));
    if ($emailTarget !== '') {
@@ -837,7 +836,9 @@ public function runSyncFromConfig(array $cfg): void {
 	 }
    }
  
-   $r[] = 'Total sessions found (all pages): ' . $total;
+ 	$r[] = 'Total sessions found (all pages): ' . $total;
+   $__totalMs = $this->ms($__tAll);
+   $r[] = 'Total duration: ' . $this->fmtDuration($__totalMs);
    $r[] = $this->optDry ? 'Pagination OK. (read-only)' : 'Pagination OK. (writes applied when needed)';
  
    $ses->set('pl_sync_report', implode("\n",$r));
