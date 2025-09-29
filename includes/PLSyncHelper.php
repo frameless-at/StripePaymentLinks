@@ -56,7 +56,9 @@ final class PLSyncHelper extends Wire {
 	private function findUserByEmailCached(string $email): ?\ProcessWire\User {
 	  $key = strtolower($email);
 	  if (array_key_exists($key, $this->userCache)) return $this->userCache[$key];
-	  return $this->userCache[$key] = $this->findUserByEmail($email);
+	  $u = $this->findUserByEmail($email);
+	  if ($u) $this->userCache[$key] = $u; // nur positive Treffer cachen
+	  return $u;
 	}
 	
 	private array $linkedMapCache = []; // emailLower => [sessionId => purchaseId]
@@ -222,17 +224,23 @@ private function fetchSessionsForKey(string $apiKey, int $fromTs, int $toTs, int
   * @param string $apiKey                  // neu
   * @param array<string,int> $linkedSet    // neu: map sessionId => purchaseId
   */
-private function reportSessionRow($s, array &$report, string $apiKey, array $preLinkedMap = []): void {
+/**
+   * @param object $s
+   * @param array  $report
+   * @param string $apiKey
+   * @param array<string,int> $preLinkedMap  // optional: vorab berechnete Map sessionId=>purchaseId
+   */
+  private function reportSessionRow($s, array &$report, string $apiKey, array $preLinkedMap = []): void {
 	$sid  = (string)($s->id ?? '');
 	$paid = ((string)($s->payment_status ?? '')) === 'paid';
 	$when = isset($s->created) ? date('Y-m-d H:i', (int)$s->created) : '';
-	$line = $when . substr($sid, 0, 12) . '...';
+	$line = $when . ' ' . substr($sid, 0, 12) . '...';
   
 	if (!$paid) return;
   
 	// Email aus der List-Response (keine extra API-Calls)
 	$email = $this->g($s, ['customer_details','email']) ?? $this->g($s, ['customer_email']);
-	if (!$email) { 
+	if (!$email) {
 	  $report[] = $line . ' [SKIP no email]';
 	  return;
 	}
@@ -242,10 +250,8 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
 	$linkedId = null;
 	if ($u) {
 	  if ($preLinkedMap) {
-		// Prebuilt Map (schnellster Weg bei Email-Target)
 		$linkedId = $preLinkedMap[$sid] ?? null;
 	  } else {
-		// On-demand Map für diesen User (einmal pro User)
 		$map = $this->linkedMapForUser($u);
 		$linkedId = $map[$sid] ?? null;
 	  }
@@ -254,36 +260,44 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
 	$status = ($u && $linkedId) ? 'LINKED' : 'MISSING';
 	$line  .= ' [' . $status . '] ' . $email;
   
-	// Early exit: bereits verlinkt & kein Update gewünscht → keine Stripe-Calls
+// Early exit: already linked and we don't update existing → skip
 	if ($linkedId && !$this->optUpdateExisting) {
 	  $report[] = $line . ' ⇒ action: LINKED (no update)';
 	  return;
 	}
-  
-	// Nur Line-Items laden (kein expand der Session)
-	$items = null;
-	try {
-	  $items = $this->fetchLineItemsWithClient($apiKey, $sid);
-	} catch (\Throwable $e) {
-	  $report[] = $line . ' [items failed]';
+	
+	// 1) Expanded Session holen (fürs Meta maßgeblich!)
+	$expanded = $this->retrieveExpandedSession($sid, $apiKey);
+	if (!$expanded) {
+	  $report[] = $line . ' [expand failed]';
 	  return;
 	}
-  
-	// Währung aus der Session-List-Response nehmen (falls vorhanden)
-	$sessionCurrency = strtoupper((string)($s->currency ?? 'EUR'));
-  
+	
+	// 2) Line-Items aus expanded verwenden (Fallback nur wenn leer)
+	$items = $this->g($expanded, ['line_items']);
+	if (!$items) {
+	  try {
+		$items = $this->fetchLineItemsWithClient($apiKey, $sid);
+	  } catch (\Throwable $e) {
+		$report[] = $line . ' [items failed]';
+		return;
+	  }
+	}
+	
 	try {
-	  [$lines, $productIds] = $this->buildLinesMetaFromStripeItems($items, $sessionCurrency);
+	  [$lines, $productIds] = $this->buildLinesMetaFromStripeItems($items, (string)($expanded->currency ?? 'EUR'));
 	} catch (\Throwable $e) {
 	  $report[] = $line . ' [items build failed]';
 	  return;
 	}
-  
-	// UPDATE-Pfad
+	
+	// Wichtig: fürs Persistieren NUR die EXPANDIERTE Session verwenden!
+	$sessionForPersist = $expanded;
+	
 	if ($linkedId) {
 	  $line .= ' ⇒ action: UPDATE purchase #' . (int)$linkedId;
 	  if (!$this->optDry) {
-		try { $this->persistUpdatePurchase($u, (int)$linkedId, /*sessionObj*/ (array)$s, $lines, $productIds); } catch (\Throwable $e) { /* silent */ }
+		try { $this->persistUpdatePurchase($u, (int)$linkedId, $sessionForPersist, $lines, $productIds); } catch (\Throwable $e) { /* silent */ }
 	  }
 	  $report[] = $line;
 	  return;
@@ -307,18 +321,22 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
 		$report[] = $line . ' ⇒ action: SKIP (user create failed)';
 		return;
 	  }
+	  
+	  $this->userCache[strtolower($email)] = $u;
+	  $this->linkedMapCache[strtolower($email)] = $this->linkedMapForUser($u);
 	}
   
 	// CREATE purchase
 	$line .= ' ⇒ action: CREATE (purchase)';
 	if (!$this->optDry) {
-	  try { $this->persistNewPurchase($u, /*sessionObj*/ (array)$s, $lines, $productIds); } catch (\Throwable $e) { /* silent */ }
+	  try { $this->persistNewPurchase($u, $sessionForPersist, $lines, $productIds); } catch (\Throwable $e) { /* silent */ }
 	}
 	$report[] = $line;
 	foreach ($lines as $L) $report[] = '         ' . $L;
 	$report[] = '';
-  }/**
- * Fetch line items for a given Stripe Checkout Session.
+  }
+  
+/* Fetch line items for a given Stripe Checkout Session.
  *
  * @param string $sessionId
  * @return object Stripe list object (data[] of line items).
@@ -419,22 +437,6 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
   }
 
 /**
- * Check if the given session id is already linked on user's purchases.
- *
- * @param \ProcessWire\User $u
- * @param string            $sessionId
- * @return bool
- */
-  private function isSessionLinkedToUser(\ProcessWire\User $u, string $sessionId): bool {
-	if (!$u->hasField('spl_purchases')) return false;
-	foreach ($u->spl_purchases as $item) {
-	  $sid = $this->extractSessionIdFromMeta($item->meta('stripe_session'));
-	  if ($sid && $sid === $sessionId) return true;
-	}
-	return false;
-  }
-
-/**
  * Extract session id from meta('stripe_session').
  *
  * @param mixed $meta
@@ -460,15 +462,15 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
  * @param string $sessionId
  * @return object|null
  */
-private function retrieveExpandedSession(string $sessionId, ?string $apiKey=null) {
+private function retrieveExpandedSession(string $sessionId, string $apiKey) {
    try {
-	 $client = $apiKey ? $this->clientFor($apiKey) : new \Stripe\StripeClient(null);
+	 $client = $this->clientFor($apiKey);
 	 return $client->checkout->sessions->retrieve($sessionId, [
 	   'expand' => ['line_items.data.price.product', 'customer'],
 	 ]);
    } catch (\Throwable $e) {
 	 try {
-	   $client = $apiKey ? $this->clientFor($apiKey) : new \Stripe\StripeClient(null);
+	   $client = $this->clientFor($apiKey);
 	   return $client->checkout->sessions->retrieve($sessionId);
 	 } catch (\Throwable $e2) {}
 	 return null;
@@ -516,21 +518,6 @@ private function retrieveExpandedSession(string $sessionId, ?string $apiKey=null
 	return null;
   }
 
-/**
- * Return the purchase repeater page id linked to this session id, if any.
- *
- * @param \ProcessWire\User $u
- * @param string            $sessionId
- * @return int|null
- */
-  private function findLinkedPurchaseId(\ProcessWire\User $u, string $sessionId): ?int {
-	if (!$u->hasField('spl_purchases') || $sessionId === '') return null;
-	foreach ($u->spl_purchases as $item) {
-	  $sid = $this->extractSessionIdFromMeta($item->meta('stripe_session'));
-	  if ($sid && $sid === $sessionId) return (int)$item->id;
-	}
-	return null;
-  }
 
 /**
  * Persist a new purchase repeater item (CREATE path).
