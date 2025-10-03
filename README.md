@@ -44,7 +44,7 @@ The module is designed for small e-commerce or membership scenarios where a full
   - Notices (expired access, already purchased, reset expired)  
 
 - **Synchronization (Sync Helper)**  
-  - CLI/admin helper to **synchronize Stripe Checkout sessions** into ProcessWire users  
+  - Admin helper to **synchronize Stripe Checkout sessions** into ProcessWire users  
   - Supports **dry-run mode** (no writes, for inspection only)  
   - Options for **update existing purchases** and **create missing users**  
   - Date range filters (`from`, `to`)  
