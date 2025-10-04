@@ -166,6 +166,8 @@ This ensures the module’s modals, buttons, and notices render correctly, even 
 
 ## Roadmap
 
+- ~~Sync helper for syncing older purchases or for controlling reasons~~ since v1.0.7
+- Support for auto handling subscriptions of gated content
 - Optional framework support (UIkit / Tailwind) via JSON view mappings
 - Add more payment providers (Mollie, PayPal, …)
 - Frontend delivery templates for different product types
