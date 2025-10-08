@@ -103,6 +103,59 @@ The module is designed for small e-commerce or membership scenarios where a full
 
 ---
 
+## Stripe Webhook & Subscription Handling
+
+The module supports **real-time synchronization** between Stripe subscriptions and ProcessWire user access.
+
+### Webhook Endpoint
+
+Add a webhook endpoint in your Stripe Dashboard under  
+**Developers → Webhooks → + Add endpoint**
+
+Set the URL to:
+```
+https://yourdomain.com/stripepaymentlinks/api/stripe-webhook
+```
+
+This endpoint automatically processes the following events:
+- Subscription cancellation, pause, resume, or renewal
+- Invoice payment success/failure
+
+### Webhook Events to Enable
+
+When adding the webhook in Stripe, either:
+
+- **Send all events** (recommended for testing), **or**
+- **Select only the relevant subscription-related events:**
+  ```
+  customer.subscription.updated
+  customer.subscription.deleted
+  customer.subscription.paused
+  customer.subscription.resumed
+  invoice.payment_succeeded
+  invoice.payment_failed
+  ```
+
+> 💡 **Note:**  
+> Some Stripe accounts don’t show explicit `paused` or `resumed` events.  
+> In those cases, Stripe sends them as `customer.subscription.updated` events where the `pause_collection` field changes.  
+> The module automatically handles both forms.
+
+### Webhook Secret
+
+After creating the webhook, copy the **Webhook Signing Secret** from Stripe and paste it into  
+*Modules → Stripe Payment Links → Webhook Signing Secret.*
+
+### Behavior
+
+- **Paused or canceled** subscriptions immediately block access.
+- **Resumed** subscriptions automatically restore access.
+- **Renewed** subscriptions extend access based on the new billing period.
+- Each purchase stores a per-product `period_end_map` (timestamp of subscription end).  
+  The webhook updates this automatically when the subscription changes.
+
+---
+
 ## Synchronization / Sync Helper
 
 For advanced scenarios (e.g. when purchases were made outside the normal flow, or to backfill history), the module provides a **Sync Helper**:
@@ -128,6 +181,7 @@ This makes it easy to audit or re-import purchases safely.
 ## Configuration
 
 - **Stripe Secret API Key**
+- **Stripe Webhook Signing Secret** (optional, needed only for handloing subscriptions)
 - **Product templates** (to enable `requires_access` / `allow_multiple_purchases` flags)
 - **Access mail policy** (`never`, `newUsersOnly`, `always`)
 - **Magic link TTL in minutes**
@@ -156,7 +210,9 @@ This ensures the module’s modals, buttons, and notices render correctly, even 
 - Purchases are stored as one repeater item per checkout.
 - All purchased product IDs are stored in `meta('product_ids')`.
 - Session meta (Stripe Checkout session) is stored in `meta('stripe_session')`.
-- Access control uses `hasPurchasedProduct($user, $product)`.
+- Recurring products store per-product expiry timestamps in `meta('period_end_map')`.
+- The webhook endpoint keeps these timestamps and paused/resumed states in sync.
+- Access control uses `hasActiveAccess($user, $product)` to evaluate current entitlement.
 - Modals are rendered via `ModalRenderer.php` with a clean Bootstrap view.
 - Texts are centralized in `defaultTexts()` and must be accessed with `mt()` / `t()`.
 - **Sync Helper** (`PLSyncHelper`) implements the same persistence logic as checkout.  
@@ -166,9 +222,10 @@ This ensures the module’s modals, buttons, and notices render correctly, even 
 
 ## Roadmap
 
+- ~~Sync helper for syncing older purchases or for controlling reasons~~ since v1.0.7
+- ~~Support for auto handling subscriptions of gated content~~ since v1.0.8
 - Optional framework support (UIkit / Tailwind) via JSON view mappings
 - Add more payment providers (Mollie, PayPal, …)
-- Frontend delivery templates for different product types
 
 ---
 
