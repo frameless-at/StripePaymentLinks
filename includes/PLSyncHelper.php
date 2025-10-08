@@ -210,131 +210,109 @@ private function fetchSessionsForKey(string $apiKey, int $fromTs, int $toTs, int
  }
 
 /**
- * Append a single session row to the report and (if paid) run the
- * full CREATE/UPDATE decision flow. Will also perform writes when
- * dry-run is disabled.
- *
- * @param object $s       Stripe Checkout Session object.
- * @param array  $report  Report buffer (by ref).
- * @return void
- */  
-/**
-  * @param object $s
-  * @param array  $report
-  * @param string $apiKey                  // neu
-  * @param array<string,int> $linkedSet    // neu: map sessionId => purchaseId
+  * Append a single session row to the report and (if paid) run the
+  * CREATE/UPDATE flow. When writing, also backfill missing period_end_map.
+  *
+  * @param object            $s            Stripe Checkout Session (list payload).
+  * @param array<string>     $report       Report buffer (by ref).
+  * @param string            $apiKey       Stripe secret used for this batch.
+  * @param array<string,int> $preLinkedMap Optional map sessionId=>purchaseId for the target user.
+  * @return void
   */
-/**
-   * @param object $s
-   * @param array  $report
-   * @param string $apiKey
-   * @param array<string,int> $preLinkedMap  // optional: vorab berechnete Map sessionId=>purchaseId
-   */
-  private function reportSessionRow($s, array &$report, string $apiKey, array $preLinkedMap = []): void {
-	$sid  = (string)($s->id ?? '');
-	$paid = ((string)($s->payment_status ?? '')) === 'paid';
-	$when = isset($s->created) ? date('Y-m-d H:i', (int)$s->created) : '';
-	$line = $when . ' ' . substr($sid, 0, 12) . '...';
-  
-	if (!$paid) return;
-  
-	// Email aus der List-Response (keine extra API-Calls)
-	$email = $this->g($s, ['customer_details','email']) ?? $this->g($s, ['customer_email']);
-	if (!$email) {
-	  $report[] = $line . ' [SKIP no email]';
-	  return;
-	}
-  
-	// User + verlinkte Käufe aus Cache/Map
-	$u = $this->findUserByEmailCached($email);
-	$linkedId = null;
-	if ($u) {
-	  if ($preLinkedMap) {
-		$linkedId = $preLinkedMap[$sid] ?? null;
-	  } else {
-		$map = $this->linkedMapForUser($u);
-		$linkedId = $map[$sid] ?? null;
-	  }
-	}
-  
-	$status = ($u && $linkedId) ? 'LINKED' : 'MISSING';
-	$line  .= ' [' . $status . '] ' . $email;
-  
-// Early exit: already linked and we don't update existing → skip
-	if ($linkedId && !$this->optUpdateExisting) {
-	  $report[] = $line . ' ⇒ action: LINKED (no update)';
-	  return;
-	}
-	
-	// 1) Expanded Session holen (fürs Meta maßgeblich!)
-	$expanded = $this->retrieveExpandedSession($sid, $apiKey);
-	if (!$expanded) {
-	  $report[] = $line . ' [expand failed]';
-	  return;
-	}
-	
-	// 2) Line-Items aus expanded verwenden (Fallback nur wenn leer)
-	$items = $this->g($expanded, ['line_items']);
-	if (!$items) {
-	  try {
-		$items = $this->fetchLineItemsWithClient($apiKey, $sid);
-	  } catch (\Throwable $e) {
-		$report[] = $line . ' [items failed]';
-		return;
-	  }
-	}
-	
-	try {
-	  [$lines, $productIds] = $this->buildLinesMetaFromStripeItems($items, (string)($expanded->currency ?? 'EUR'));
-	} catch (\Throwable $e) {
-	  $report[] = $line . ' [items build failed]';
-	  return;
-	}
-	
-	// Wichtig: fürs Persistieren NUR die EXPANDIERTE Session verwenden!
-	$sessionForPersist = $expanded;
-	
-	if ($linkedId) {
-	  $line .= ' ⇒ action: UPDATE purchase #' . (int)$linkedId;
-	  if (!$this->optDry) {
-		try { $this->persistUpdatePurchase($u, (int)$linkedId, $sessionForPersist, $lines, $productIds); } catch (\Throwable $e) { /* silent */ }
-	  }
-	  $report[] = $line;
-	  return;
-	}
-  
-	// CREATE-Pfad (User ggf. anlegen)
-	if (!$u) {
-	  if (!$this->optCreateMissing) {
-		$report[] = $line . ' ⇒ action: SKIP (user missing)';
-		return;
-	  }
-	  if ($this->optDry) {
-		$report[] = $line . ' ⇒ action: CREATE (purchase)';
-		foreach ($lines as $L) $report[] = '         ' . $L;
-		$report[] = '';
-		return;
-	  }
-	  $fullName = (string)($this->g($s, ['customer_details','name']) ?? '');
-	  $u = $this->createUserLikeModule($email, $fullName);
-	  if (!$u || !$u->id) {
-		$report[] = $line . ' ⇒ action: SKIP (user create failed)';
-		return;
-	  }
-	  
-	  $this->userCache[strtolower($email)] = $u;
-	  $this->linkedMapCache[strtolower($email)] = $this->linkedMapForUser($u);
-	}
-  
-	// CREATE purchase
-	$line .= ' ⇒ action: CREATE (purchase)';
-	if (!$this->optDry) {
-	  try { $this->persistNewPurchase($u, $sessionForPersist, $lines, $productIds); } catch (\Throwable $e) { /* silent */ }
-	}
-	$report[] = $line;
-	foreach ($lines as $L) $report[] = '         ' . $L;
-	$report[] = '';
-  }
+ private function reportSessionRow($s, array &$report, string $apiKey, array $preLinkedMap = []): void {
+	 $sid  = (string)($s->id ?? '');
+	 $paid = ((string)($s->payment_status ?? '')) === 'paid';
+	 $when = isset($s->created) ? date('Y-m-d H:i', (int)$s->created) : '';
+	 $line = $when . ' ' . substr($sid, 0, 12) . '...';
+ 
+	 if (!$paid) return;
+ 
+	 $email = $this->g($s, ['customer_details','email']) ?? $this->g($s, ['customer_email']);
+	 if (!$email) { $report[] = $line . ' [SKIP no email]'; return; }
+ 
+	 // Resolve user + prior linking
+	 $u = $this->findUserByEmailCached($email);
+	 $linkedId = null;
+	 if ($u) {
+		 $linkedId = $preLinkedMap ? ($preLinkedMap[$sid] ?? null) : ($this->linkedMapForUser($u)[$sid] ?? null);
+	 }
+ 
+	 $status = ($u && $linkedId) ? 'LINKED' : 'MISSING';
+	 $line  .= ' [' . $status . '] ' . $email;
+ 
+	 if ($linkedId && !$this->optUpdateExisting) {
+		 $report[] = $line . ' ⇒ action: LINKED (no update)';
+		 return;
+	 }
+ 
+	 // Expanded session (for meta + subscription details)
+	 $expanded = $this->retrieveExpandedSession($sid, $apiKey);
+	 if (!$expanded) { $report[] = $line . ' [expand failed]'; return; }
+ 
+	 // Resolve subscription period end (if any)
+	 $client    = $this->clientFor($apiKey);
+	 $periodEnd = $this->resolvePeriodEndFromSessionOrApi($expanded, $client); // int|null
+ 
+	 // Line items (prefer expanded)
+	 $items = $this->g($expanded, ['line_items']);
+	 if (!$items) {
+		 try { $items = $this->fetchLineItemsWithClient($apiKey, $sid); }
+		 catch (\Throwable $e) { $report[] = $line . ' [items failed]'; return; }
+	 }
+ 
+	 try {
+		 // Append period end to recurring lines
+		 [$lines, $productIds] = $this->buildLinesMetaFromStripeItems($items, (string)($expanded->currency ?? 'EUR'), $periodEnd);
+	 } catch (\Throwable $e) {
+		 $report[] = $line . ' [items build failed]';
+		 return;
+	 }
+ 
+	 $sessionForPersist = $expanded;
+ 
+	 // UPDATE
+	 if ($linkedId) {
+		 $line .= ' ⇒ action: UPDATE purchase #' . (int)$linkedId;
+		 if (!$this->optDry) {
+			 try {
+				 $this->persistUpdatePurchase($u, (int)$linkedId, $sessionForPersist, $lines, $productIds);
+				 // Backfill period_end_map for legacy items (no-op if already present)
+				 $this->backfillPeriodEndsForUser($u, $client);
+			 } catch (\Throwable $e) { /* logged in helpers */ }
+		 }
+		 $report[] = $line;
+		 return;
+	 }
+ 
+	 // CREATE (create user if missing)
+	 if (!$u) {
+		 if (!$this->optCreateMissing) { $report[] = $line . ' ⇒ action: SKIP (user missing)'; return; }
+		 if ($this->optDry) {
+			 $report[] = $line . ' ⇒ action: CREATE (purchase)';
+			 foreach ($lines as $L) $report[] = '         ' . $L;
+			 $report[] = '';
+			 return;
+		 }
+		 $fullName = (string)($this->g($s, ['customer_details','name']) ?? '');
+		 $u = $this->createUserLikeModule($email, $fullName);
+		 if (!$u || !$u->id) { $report[] = $line . ' ⇒ action: SKIP (user create failed)'; return; }
+		 $this->userCache[strtolower($email)]      = $u;
+		 $this->linkedMapCache[strtolower($email)] = $this->linkedMapForUser($u);
+	 }
+ 
+	 // CREATE purchase
+	 $line .= ' ⇒ action: CREATE (purchase)';
+	 if (!$this->optDry) {
+		 try {
+			 $this->persistNewPurchase($u, $sessionForPersist, $lines, $productIds);
+			 // Backfill period_end_map for legacy items (no-op if already present)
+			 $this->backfillPeriodEndsForUser($u, $client);
+		 } catch (\Throwable $e) { /* logged in helpers */ }
+	 }
+	 $report[] = $line;
+	 foreach ($lines as $L) $report[] = '         ' . $L;
+	 $report[] = '';
+ }
   
 /* Fetch line items for a given Stripe Checkout Session.
  *
@@ -376,50 +354,48 @@ private function fetchSessionsForKey(string $apiKey, int $fromTs, int $toTs, int
   }
 
 /**
- * Build purchase_lines, product_ids and a compact line-items array
- * from Stripe line items. No writes; used for decision + persistence.
- *
- * @param object|array $items            Stripe list object or array-like.
- * @param string       $sessionCurrency  Fallback currency.
- * @return array{0:array<int,string>,1:array<int,int>,2:array<int,array>}
- */
-  private function buildLinesMetaFromStripeItems($items, string $sessionCurrency = 'EUR'): array {
-	$lines = [];
-	$productIds = [];
-	$compact = [];
+   * Build purchase_lines and product_ids from Stripe line items.
+   * Appends " • YYYY-MM-DD" to recurring items if $periodEndTs is given.
+   *
+   * @param object|array $items           Stripe list object or array-like.
+   * @param string       $sessionCurrency Fallback currency.
+   * @param int|null     $periodEndTs     Subscription period end (unix ts) or null.
+   * @return array{0:array<int,string>,1:array<int,int>}
+   */
+  private function buildLinesMetaFromStripeItems($items, string $sessionCurrency = 'EUR', ?int $periodEndTs = null): array {
+	  $lines = [];
+	  $productIds = [];
   
-	$data = (is_object($items) && isset($items->data) && is_array($items->data)) ? $items->data : [];
-	foreach ($data as $li) {
-	  $stripePid = $this->liStripeProductId($li);
-	  $mappedId  = $stripePid !== '' ? ($this->mapStripeProductToPageId($stripePid) ?? 0) : 0;
+	  $data = (is_object($items) && isset($items->data) && is_array($items->data)) ? $items->data : [];
+	  foreach ($data as $li) {
+		  $stripePid = $this->liStripeProductId($li);
+		  $mappedId  = $stripePid !== '' ? ($this->mapStripeProductToPageId($stripePid) ?? 0) : 0;
   
-	  $qty   = max(1, (int)($this->g($li, ['quantity']) ?? 1));
-	  $name  = $this->g($li, ['description'])
-		   ?? $this->g($li, ['price','product','name'])
-		   ?? $this->g($li, ['price','nickname'])
-		   ?? 'Item';
+		  $qty   = max(1, (int)($this->g($li, ['quantity']) ?? 1));
+		  $name  = $this->g($li, ['description'])
+				?? $this->g($li, ['price','product','name'])
+				?? $this->g($li, ['price','nickname'])
+				?? 'Item';
   
-	  $cents = (int)($this->g($li, ['amount_total'])
-			  ?? $this->g($li, ['amount'])
-			  ?? 0);
+		  $cents = (int)($this->g($li, ['amount_total'])
+				  ?? $this->g($li, ['amount'])
+				  ?? 0);
   
-	  $cur   = strtoupper((string)($this->g($li, ['currency']) ?? $sessionCurrency ?: 'EUR'));
-	  $lines[] = $mappedId . ' • ' . $qty . ' • ' . $name . ' • ' . number_format($cents/100, 2, '.', '') . ' ' . $cur;
-	  $productIds[] = (int)$mappedId;
+		  $cur   = strtoupper((string)($this->g($li, ['currency']) ?? $sessionCurrency ?: 'EUR'));
   
-	  $compact[] = array_filter([
-		'id'             => $this->g($li, ['id']) ?? null,
-		'quantity'       => $qty,
-		'amount_total'   => $cents,
-		'currency'       => $cur,
-		'price_id'       => $this->g($li, ['price','id']) ?? null,
-		'stripe_product' => $stripePid ?: null, 
-		'product_id'     => (int)$mappedId,   
-		'product_name'   => $name,
-	  ], static fn($v) => $v !== null);
-	}
+		  $line = $mappedId . ' • ' . $qty . ' • ' . $name . ' • ' . number_format($cents/100, 2, '.', '') . ' ' . $cur;
   
-	return [$lines, $productIds, $compact];
+		  // Append period end for recurring prices (if available)
+		  $isRecurring = (bool) $this->g($li, ['price','recurring']);
+		  if ($isRecurring && $periodEndTs) {
+			  $line .= ' • ' . gmdate('Y-m-d', $periodEndTs);
+		  }
+  
+		  $lines[]      = $line;
+		  $productIds[] = (int) $mappedId;
+	  }
+  
+	  return [$lines, $productIds];
   }
   
 /* ========= Helpers: PW users / purchases ========= */
@@ -573,6 +549,199 @@ private function retrieveExpandedSession(string $sessionId, string $apiKey) {
 	$u->of(true);
   }
 
+/**
+   * Resolve the subscription period end timestamp for a given Stripe Checkout session.
+   *
+   * This helper tries multiple strategies:
+   *  1. If the session already contains an expanded subscription object, use its
+   *     `current_period_end` or the one from its first subscription item.
+   *  2. If the session only contains a subscription ID, fetch the subscription
+   *     via the Stripe API and extract the same data.
+   *
+   * Used by the Sync Helper to backfill or initialize the `period_end_map` for
+   * recurring purchases imported from Stripe.
+   *
+   * @param \Stripe\Checkout\Session|array|object $session The Stripe Checkout session (may contain expanded subscription).
+   * @param \Stripe\StripeClient $client Initialized Stripe client with valid secret key.
+   * @return int|null UNIX timestamp of the current period end, or null if not found.
+   */
+  private function resolvePeriodEndFromSessionOrApi($session, \Stripe\StripeClient $client): ?int {
+	  // a) Expanded subscription object present on the session?
+	  try {
+		  if (is_object($session) && is_object($session->subscription ?? null)) {
+			  $sub = $session->subscription;
+			  if (!empty($sub->current_period_end)) return (int) $sub->current_period_end;
+			  if (!empty($sub->items->data) && is_array($sub->items->data)) {
+				  foreach ($sub->items->data as $si) {
+					  if (!empty($si->current_period_end)) return (int) $si->current_period_end;
+				  }
+			  }
+		  }
+	  } catch (\Throwable $e) {
+		  // ignore, fall through to ID path
+	  }
+  
+	  // b) Only a subscription ID? Fetch it.
+	  try {
+		  $subId = null;
+		  if (is_object($session) && is_string($session->subscription ?? null) && $session->subscription !== '') {
+			  $subId = (string) $session->subscription;
+		  } elseif (is_array($session) && !empty($session['subscription']) && is_string($session['subscription'])) {
+			  $subId = (string) $session['subscription'];
+		  }
+		  if ($subId) {
+			  $sub = $client->subscriptions->retrieve($subId, []);
+			  if (!empty($sub->current_period_end)) return (int) $sub->current_period_end;
+			  if (!empty($sub->items->data) && is_array($sub->items->data)) {
+				  foreach ($sub->items->data as $si) {
+					  if (!empty($si->current_period_end)) return (int) $si->current_period_end;
+				  }
+			  }
+		  }
+	  } catch (\Throwable $e) {
+		  wire('log')->save(StripePaymentLinks::LOG_PL, '[SYNC] resolvePeriodEnd fetch failed: '.$e->getMessage());
+	  }
+  
+	  return null;
+  }
+  
+/**
+   * Backfill missing or incomplete subscription metadata on purchases for a user.
+   *
+   * What this does:
+   * - If a purchase has no `period_end_map`, it will be created using the
+   *   subscription's `current_period_end` for all mapped product IDs.
+   * - It mirrors subscription state into meta flags:
+   *     - Sets or removes "{productId}_paused" depending on `pause_collection`.
+   *     - If `status === canceled` → forces an effective end (prefers `ended_at`,
+   *       then `cancel_at`, then `current_period_end`, finally `time()`).
+   *     - If `cancel_at_period_end === true` → ensures period end >= `current_period_end`.
+   * - Never shortens an existing end date; only raises or initializes it.
+   *
+   * Notes:
+   * - This is a best-effort backfill for data imported without webhooks. Live webhook
+   *   updates remain the source of truth for future transitions.
+   *
+   * @param \ProcessWire\User $u The ProcessWire user whose purchases should be updated.
+   * @param \Stripe\StripeClient $client Initialized Stripe client with valid secret key.
+   * @return void
+   */
+  private function backfillPeriodEndsForUser(\ProcessWire\User $u, \Stripe\StripeClient $client): void {
+	  if (!$u->hasField('spl_purchases') || !$u->spl_purchases->count()) return;
+  
+	  foreach ($u->spl_purchases as $p) {
+		  try {
+			  $map = (array) $p->meta('period_end_map');       // may be empty
+			  $prodIds = array_map('intval', (array) $p->meta('product_ids'));
+			  if (!$prodIds) continue;
+  
+			  // Pull session meta to find the subscription reference
+			  $sess = (array) $p->meta('stripe_session');
+			  if (!$sess) continue;
+  
+			  // Rebuild a minimal session-like object for convenience
+			  $sessionObj = (object) $sess;
+  
+			  // Try to get a subscription object or ID
+			  $subObj = null;
+			  $subId  = null;
+  
+			  if (is_object($sessionObj->subscription ?? null)) {
+				  $subObj = $sessionObj->subscription;
+				  $subId  = (string)($subObj->id ?? '');
+			  } elseif (!empty($sess['subscription']) && is_string($sess['subscription'])) {
+				  $subId = (string) $sess['subscription'];
+			  }
+  
+			  // If we only have an ID, fetch the subscription
+			  if (!$subObj && $subId) {
+				  try {
+					  $subObj = $client->subscriptions->retrieve($subId, []);
+				  } catch (\Throwable $fe) {
+					  // If we can't fetch, we may still initialize an end date via resolver
+				  }
+			  }
+  
+			  // Derive core flags/timestamps
+			  $paused   = false;
+			  $canceled = false;
+			  $cap      = false; // cancel_at_period_end
+			  $now      = time();
+  
+			  $currentEnd = null;
+			  $cancelAt   = null;
+			  $endedAt    = null;
+  
+			  if ($subObj) {
+				  $paused     = isset($subObj->pause_collection) && $subObj->pause_collection !== null;
+				  $canceled   = (string)($subObj->status ?? '') === 'canceled';
+				  $cap        = (bool)($subObj->cancel_at_period_end ?? false);
+				  $currentEnd = is_numeric($subObj->current_period_end ?? null) ? (int)$subObj->current_period_end : null;
+				  $cancelAt   = is_numeric($subObj->cancel_at ?? null)          ? (int)$subObj->cancel_at          : null;
+				  $endedAt    = is_numeric($subObj->ended_at ?? null)           ? (int)$subObj->ended_at           : null;
+			  } else {
+				  // Fallback: at least try to resolve current period end for annotation/initial map
+				  $currentEnd = $this->resolvePeriodEndFromSessionOrApi($sessionObj, $client);
+			  }
+  
+			  // If we couldn't resolve anything at all, skip this purchase
+			  if ($currentEnd === null && !$subObj) continue;
+  
+			  $changed = false;
+  
+			  foreach ($prodIds as $pid) {
+				  // --- paused marker handling ---
+				  $flagKey = $pid . '_paused';
+				  if ($paused) {
+					  if (!array_key_exists($flagKey, $map)) {
+						  $map[$flagKey] = 1;
+						  $changed = true;
+					  }
+				  } else {
+					  if (array_key_exists($flagKey, $map)) {
+						  unset($map[$flagKey]);
+						  $changed = true;
+					  }
+				  }
+  
+				  // --- effective period end handling ---
+				  $existing = isset($map[$pid]) && is_numeric($map[$pid]) ? (int)$map[$pid] : 0;
+				  $targetEnd = $existing;
+  
+				  if ($canceled) {
+					  // Choose the most authoritative end:
+					  // 1) ended_at (immediate termination), else 2) cancel_at, else 3) current_period_end, else 4) now
+					  $end = $endedAt ?: ($cancelAt ?: ($currentEnd ?: $now));
+					  if ($end > $targetEnd) $targetEnd = $end;
+				  } elseif ($cap && $currentEnd) {
+					  // Scheduled to end at period end
+					  if ($currentEnd > $targetEnd) $targetEnd = $currentEnd;
+				  } elseif ($currentEnd) {
+					  // Active: ensure we don't shorten; only raise if newer invoice extended the end
+					  if ($currentEnd > $targetEnd) $targetEnd = $currentEnd;
+				  }
+  
+				  if ($targetEnd !== $existing && $targetEnd > 0) {
+					  $map[$pid] = $targetEnd;
+					  $changed = true;
+				  }
+			  }
+  
+			  if ($changed) {
+				  $p->meta('period_end_map', $map);
+				  try { $p->save(); } catch (\Throwable $e) {}
+				  wire('log')->save(
+					  StripePaymentLinks::LOG_PL,
+					  sprintf('[SYNC] backfill updated purchase %d for user %d', (int)$p->id, (int)$u->id)
+				  );
+			  }
+		  } catch (\Throwable $e) {
+			  // Keep the backfill robust; log and continue with other purchases
+			  wire('log')->save(StripePaymentLinks::LOG_PL, '[SYNC] backfill error: ' . $e->getMessage());
+		  }
+	  }
+  }
+  
 /**
  * Update an existing purchase repeater item (UPDATE path).
  *
