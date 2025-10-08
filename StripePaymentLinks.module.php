@@ -31,7 +31,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	public static function getModuleInfo(): array {
 		return [
 			'title'       => 'StripePaymentLinks',
-			'version'     => '1.0.7', 
+			'version'     => '1.0.8', 
 			'summary'     => 'Stripe payment-link redirects, user/purchases, magic link, mails, modals.',
 			'author'      => 'frameless Media',
 			'autoload'    => true,
@@ -193,7 +193,10 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			$e->return = $this->renderBootstrapFallback($html);
 		});
 
-
+		$this->addHook('/stripepaymentlinks/api/stripe-webhook', function($event) {
+			$this->api()->handleStripeWebhook($event);
+		});
+		
 		$this->addHook('/stripepaymentlinks/api', function($event) {
 			$this->api()->handle($event);
 		});
@@ -383,45 +386,6 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	
 		// Done
 	}
-	/**
-	 * Handle saving of module config and optionally trigger a manual sync
-	 * when the "Run sync now" button was pressed in the config UI.
-	 *
-	 * IMPORTANT: This method belongs in the module class (StripePaymentLinks),
-	 * not in the ModuleConfig class.
-	 *
-	 * @param array $data Config values being saved.
-	 * @return array The config array to persist.
-	 */
-	public function ___saveConfig($data) {
-		$this->wire('log')->save('stripepaymentlinks', '___saveConfig called');
-
-		// 1) Persist config first
-		$data = parent::___saveConfig($data);
-	
-		// 2) If the submit button was pressed, run the sync action
-		$input = $this->wire('input');
-		if ($input->post('pl_sync_run')) {
-			try {
-				// Re-read the freshly saved config to ensure we use the final values
-				$cfg = $this->wire('modules')->getConfig('StripePaymentLinks');
-	
-				// Example: call your sync helper here (inject $this if needed)
-				// $helper = new \ProcessWire\PLSyncHelper($this);
-				// $helper->runSyncFromConfig($cfg);
-	
-				// Temporary smoke test feedback (replace once helper is wired)
-				$this->message('Sync started – check logs for details.');
-				$this->wire('log')->save('stripepaymentlinks', '[SYNC] Triggered via config UI');
-	
-			} catch (\Throwable $e) {
-				$this->error('Sync error: ' . $e->getMessage());
-				$this->wire('log')->save('stripepaymentlinks', '[SYNC ERROR] ' . $e->getMessage());
-			}
-		}
-	
-		return $data;
-	}
 	
 	/* ========================= Public API ========================= */
 	
@@ -452,7 +416,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		// 1) Gate product/delivery pages that require access
 		if ($isAccessPage) {
 			$hasAccess = $u->isSuperuser()
-				|| ($u->isLoggedin() && $this->hasPurchasedProduct($u, $currentPage));
+					|| ($u->isLoggedin() && $this->hasActiveAccess($u, $currentPage));
 	
 			if (!$hasAccess) {
 				$sales = $currentPage->parent();
@@ -567,193 +531,235 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		return $out;
 	}
 						
-	/**
-	 * Processes Stripe checkout by verifying session, mapping purchases, attaching to user,
-	 * and sending access mails. Also manages login and access links.
+/**
+	 * Processes Stripe checkout: verifies session, maps purchases, logs in user,
+	 * appends PERIOD END for subscriptions, and stores a per-product period_end_map in meta.
 	 *
-	 * @param Page $currentPage The current ProcessWire page.
-	 * @return void
+	 * - Appends " • YYYY-MM-DD" to purchase_lines only for recurring items.
+	 * - Stores raw Stripe session (array) in meta 'stripe_session'.
+	 * - Stores per-product period end timestamps in meta 'period_end_map' => [productId => unix_ts].
 	 */
-	 public function processCheckout(Page $currentPage): void {
-	 $input     = $this->wire('input');
-	 $session   = $this->wire('session');
-	 $users     = $this->wire('users');
-	 $sanitizer = $this->wire('sanitizer');
-	 $config    = $this->wire('config');
-	 
-	 $sessionId = $input->get->text('session_id');
-	 if (!$sessionId) return;
-	 
-	 // Idempotency per browser session
-	 $processed = $session->get('pl_processed_sessions') ?: [];
-	 if (in_array($sessionId, $processed, true)) return;
-	 
-	 // Stripe SDK
-	 $sdk = $this->stripeSdkPath ?? (__DIR__ . '/vendor/stripe-php/init.php');
-	 if (!is_file($sdk)) { 
-		 $this->wire('log')->save(self::LOG_PL, 'Stripe SDK not found'); 
-		 return; 
-	 }
-	 require_once $sdk;
-	 
-	 $keys = $this->getStripeKeys();
-	 if (!count($keys)) {
-		 $this->wire('log')->save(self::LOG_PL, 'No Stripe API keys configured.');
-		 return;
-	 }
-	 
-	 try {
-		 $checkoutSession = $this->retrieveCheckoutSessionWithKeys($sessionId, $keys);
-		 if (!$checkoutSession) return;
-		 if (($checkoutSession->payment_status ?? null) !== 'paid') return;
-	 
-		 // Buyer data
-		 $email = $checkoutSession->customer_details->email
-			   ?? ($checkoutSession->customer->email ?? null)
-			   ?? $checkoutSession->customer_email
-			   ?? null;
-	 
-		 $fullName = $checkoutSession->customer_details->name
-				  ?? ($checkoutSession->customer->name ?? null)
-				  ?? ($checkoutSession->shipping->name ?? null)
-				  ?? '';
-	 
-		 if (!$email) {
-			 $this->wire('log')->save(self::LOG_PL, 'No email for session '.$sessionId);
-			 return;
-		 }
-	 
-		 // --- NEW: user creation/update via helper ---
-		 $userInfo = $this->createUserFromStripe($email, $fullName);
-		 /** @var User $buyer */
-		 $buyer    = $userInfo['user'];
-		 $isNewUser= $userInfo['isNew'];
-
-			 // Collect products
-			 $lineItems      = (array)($checkoutSession->line_items->data ?? []);
-			 $lines = [];
-			 $accessProducts = [];
-			 $allMapped      = [];
-			 $unmapped       = [];
-			 $alreadyDisallowed = false;
-	 
-			foreach ($lineItems as $li) {
+	public function processCheckout(Page $currentPage): void {
+		$input   = $this->wire('input');
+		$session = $this->wire('session');
+		$users   = $this->wire('users');
+	
+		$sessionId = $input->get->text('session_id');
+		if (!$sessionId) return;
+	
+		// Idempotency (per browser session)
+		$processed = $session->get('pl_processed_sessions') ?: [];
+		if (in_array($sessionId, $processed, true)) return;
+	
+		// Stripe SDK
+		$sdk = $this->stripeSdkPath ?? (__DIR__ . '/vendor/stripe-php/init.php');
+		if (!is_file($sdk)) { $this->wire('log')->save(self::LOG_PL, 'Stripe SDK not found'); return; }
+		require_once $sdk;
+	
+		$keys = $this->getStripeKeys();
+		if (!count($keys)) { $this->wire('log')->save(self::LOG_PL, 'No Stripe API keys configured.'); return; }
+	
+		try {
+			// Retrieve session + keep a client for possible subscription fetch
+			$bundle = $this->retrieveCheckoutSessionWithKeys($sessionId, $keys);
+			if (!$bundle) return;
+	
+			/** @var \Stripe\Checkout\Session $checkoutSession */
+			$checkoutSession = $bundle['session'];
+			/** @var \Stripe\StripeClient $stripe */
+			$stripe = $bundle['client'];
+	
+			if (($checkoutSession->payment_status ?? null) !== 'paid') return;
+	
+			// Buyer data
+			$email = $checkoutSession->customer_details->email
+				  ?? ($checkoutSession->customer->email ?? null)
+				  ?? $checkoutSession->customer_email
+				  ?? null;
+	
+			$fullName = $checkoutSession->customer_details->name
+					 ?? ($checkoutSession->customer->name ?? null)
+					 ?? ($checkoutSession->shipping->name ?? null)
+					 ?? '';
+	
+			if (!$email) { $this->wire('log')->save(self::LOG_PL, 'No email for session '.$sessionId); return; }
+	
+			// Create or update user
+			$ui       = $this->createUserFromStripe($email, $fullName);
+			/** @var \ProcessWire\User $buyer */
+			$buyer    = $ui['user'];
+			$isNew    = $ui['isNew'];
+	
+			// ---- determine subscription period end (supports expanded or fetched subscription) ----
+			$getPeriodEnd = function($session, \Stripe\StripeClient $client) {
+				// a) expanded object with current_period_end
+				if (is_object($session->subscription ?? null)) {
+					$sub = $session->subscription;
+					// prefer top-level; if missing, check items[].current_period_end
+					if (!empty($sub->current_period_end)) return (int) $sub->current_period_end;
+					if (!empty($sub->items->data) && is_array($sub->items->data)) {
+						foreach ($sub->items->data as $si) {
+							if (!empty($si->current_period_end)) return (int) $si->current_period_end;
+						}
+					}
+				}
+				// b) subscription is an ID → fetch
+				if (is_string($session->subscription ?? null) && $session->subscription !== '') {
+					try {
+						$sub = $client->subscriptions->retrieve($session->subscription, []);
+						if (!empty($sub->current_period_end)) return (int) $sub->current_period_end;
+						if (!empty($sub->items->data) && is_array($sub->items->data)) {
+							foreach ($sub->items->data as $si) {
+								if (!empty($si->current_period_end)) return (int) $si->current_period_end;
+							}
+						}
+					} catch (\Throwable $e) {
+						$this->wire('log')->save(self::LOG_PL, 'Subscription fetch failed: '.$e->getMessage());
+					}
+				}
+				return null;
+			};
+			$subscriptionPeriodEnd = $getPeriodEnd($checkoutSession, $stripe); // unix ts or null
+	
+			// ---- collect lines, build period_end_map for recurring lines ----
+			$lines             = [];
+			$accessProducts    = [];
+			$allMapped         = [];
+			$unmapped          = [];
+			$alreadyDisallowed = false;
+			$periodEndMap      = []; // [productId => unix_ts]
+	
+			$liArray = (array) ($checkoutSession->line_items->data ?? []);
+			foreach ($liArray as $li) {
 				$label = ($li->price->product->name ?? null)
 					  ?? ($li->description ?? null)
 					  ?? ($li->price->nickname ?? null)
 					  ?? 'unknown item';
-			
+	
 				$pwProduct = $this->mapStripeLineItemToProduct($li);
-			
-				$pid   = $pwProduct ? (int) $pwProduct->id : 0; // 0 = kein PW-Mapping (z.B. nur Danke-Seite)
+				$pid   = $pwProduct ? (int) $pwProduct->id : 0;
 				$qty   = max(1, (int)($li->quantity ?? 1));
 				$title = $pwProduct ? (string)$pwProduct->title : (string)$label;
-			
+	
 				$cur   = strtoupper((string)($li->currency ?? ($checkoutSession->currency ?? 'EUR')));
 				$cents = (isset($li->amount_total) && is_numeric($li->amount_total))
 					? (int)$li->amount_total
 					: ((isset($li->price->unit_amount) && is_numeric($li->price->unit_amount)) ? ((int)$li->price->unit_amount) * $qty : 0);
-			
-				// IMMER eine Line schreiben – auch ohne Mapping
-				$lines[] = $pid . ' • ' . $qty . ' • ' . $title . ' • ' . number_format($cents / 100, 2, '.', '') . ' ' . $cur;
-			
+	
+				$lineStr = $pid . ' • ' . $qty . ' • ' . $title . ' • ' . number_format($cents / 100, 2, '.', '') . ' ' . $cur;
+	
+				// Recurring detection: Stripe puts "recurring" inside price for subscription items.
+				$isRecurring = isset($li->price) && isset($li->price->recurring);
+	
+				// Append " • YYYY-MM-DD" only for recurring AND if we have a period end.
+				if ($isRecurring && $subscriptionPeriodEnd) {
+					$lineStr .= ' • ' . gmdate('Y-m-d', $subscriptionPeriodEnd);
+					if ($pid > 0) $periodEndMap[$pid] = $subscriptionPeriodEnd;
+				}
+	
+				$lines[] = $lineStr;
+	
 				if ($pwProduct && $pwProduct->id) {
 					$allMapped[$pwProduct->id] = $pwProduct;
-			
+	
 					$allowsMultiple = $this->productAllowsMultiple($pwProduct);
 					$requiresAccess = $this->productRequiresAccess($pwProduct);
-					$already        = $this->hasPurchasedProduct($buyer, $pwProduct);
-			
-					if ($requiresAccess) {
-						$accessProducts[$pwProduct->id] = $pwProduct;
-					}
-					if ($already && !$allowsMultiple) {
-						$alreadyDisallowed = true;
-					}
+					$alreadyActive  = $this->hasActiveAccess($buyer, $pwProduct);
+	
+					if ($requiresAccess) $accessProducts[$pwProduct->id] = $pwProduct;
+					if ($alreadyActive && !$allowsMultiple) $alreadyDisallowed = true;
 				} else {
-					// nur fürs Logging
 					$unmapped[] = (string) $label;
 				}
 			}
-	 
-			 // Persist single purchase item
-			 if ($buyer->hasField('spl_purchases')) {
-				 $buyer->of(false);
-				 $item = $buyer->spl_purchases->getNew();
-				 $item->set('purchase_date', time());
-				 $item->set('purchase_lines', implode("\n", $lines));
-				 $buyer->spl_purchases->add($item);
-				 $users->save($buyer, ['quiet' => true]);
-	 
-				 try {
-					 $ids = array_keys($allMapped);
-					 $item->meta('product_ids', $ids);
-					 $item->meta('stripe_session',
-						 is_object($checkoutSession) && method_exists($checkoutSession, 'toArray')
-							 ? $checkoutSession->toArray()
-							 : (array)$checkoutSession
-					 );
-					 $item->save();
-				 } catch (\Throwable $e) {
-					 $this->wire('log')->save(self::LOG_PL, 'attach single purchase meta warning: '.$e->getMessage());
-				 }
-			 }
-	 
-			 // Enforce login
-			 if (!$this->wire('user')->isLoggedin() || $this->wire('user')->id !== $buyer->id) {
-				 $this->wire('session')->forceLogin($buyer);
-			 }
-	 
-			 // Prepare access links
-			 $links = [];
-			 $token = null;
-			 if (!empty($accessProducts)) {
-				 foreach ($accessProducts as $p) {
-					 $url = $p->httpUrl;
-					 if ($isNewUser) {
-						 if ($token === null) {
-							 $ttlMinutes = (int)($this->accessTokenTtlMinutes ?: 30);
-							 $token = $this->createAccessToken($buyer, $ttlMinutes * 60);
-						 }
-						 $glue = (strpos($url, '?') === false) ? '?' : '&';
-						 $url .= $glue . 'access=' . urlencode($token);
-					 }
-					 $links[] = ['title' => (string)$p->title, 'url' => $url, 'id' => (int)$p->id];
-				 }
-				 $session->set('pl_access_links', $links);
-			 }
-	 
-			 // Mail
-			 if (!empty($links) && $this->shouldSendAccessMail($isNewUser)) {
-				 $this->mail()->sendAccessSummaryMail($this, $buyer, $links);
-			 }
-	 
-			 // Notice if product already purchased and not allowed multiple
-			 if ($alreadyDisallowed) {
-				 $this->modal()->queueAlreadyPurchasedModal();
-			 }
-	 
-			 $processed[] = $sessionId;
-			 $session->set('pl_processed_sessions', $processed);
-	 
-			 $this->wire('log')->save(
-			   self::LOG_PL,
-			   '[INFO] Processed Stripe session ' .
-			   json_encode([
-				 'session'  => $sessionId,
-				 'email'    => $email,
-				 'mapped'   => count($allMapped),
-				 'access'   => count($accessProducts),
-				 'unmapped' => $unmapped ? implode(', ', $unmapped) : '-',
-				 'newUser'  => $isNewUser ? 'yes' : 'no',
-			   ], JSON_UNESCAPED_SLASHES)
-			 );
-	 
-		 } catch (\Throwable $e) {
-			 $this->wire('log')->save(self::LOG_PL, 'processCheckout error: '.$e->getMessage().' '.$sessionId);
-			 return;
-		 }
-	 }
+	
+			// ---- persist repeater item on the user ----
+			if ($buyer->hasField('spl_purchases')) {
+				$buyer->of(false);
+				$item = $buyer->spl_purchases->getNew();
+	
+				$purchaseTs = (isset($checkoutSession->created) && is_numeric($checkoutSession->created))
+					? (int) $checkoutSession->created
+					: time();
+	
+				$item->set('purchase_date',  $purchaseTs);
+				$item->set('purchase_lines', implode("\n", $lines));
+				$buyer->spl_purchases->add($item);
+				$users->save($buyer, ['quiet' => true]);
+	
+				// Meta: product_ids, raw session array, period_end_map (only if recurring lines present)
+				try {
+					$ids = array_keys($allMapped);
+					$item->meta('product_ids', $ids);
+					$item->meta('stripe_session',
+						is_object($checkoutSession) && method_exists($checkoutSession, 'toArray')
+							? $checkoutSession->toArray()
+							: (array)$checkoutSession
+					);
+					if (!empty($periodEndMap)) {
+						$item->meta('period_end_map', $periodEndMap);
+					}
+					$item->save();
+				} catch (\Throwable $e) {
+					$this->wire('log')->save(self::LOG_PL, 'attach purchase meta warning: '.$e->getMessage());
+				}
+			}
+	
+			// Enforce login
+			if (!$this->wire('user')->isLoggedin() || $this->wire('user')->id !== $buyer->id) {
+				$this->wire('session')->forceLogin($buyer);
+			}
+	
+			// Access links (add one-time soft-login token for new users)
+			$links = [];
+			$token = null;
+			if (!empty($accessProducts)) {
+				foreach ($accessProducts as $p) {
+					$url = $p->httpUrl;
+					if ($isNew) {
+						if ($token === null) {
+							$ttlMinutes = (int)($this->accessTokenTtlMinutes ?: 30);
+							$token = $this->createAccessToken($buyer, $ttlMinutes * 60);
+						}
+						$glue = (strpos($url, '?') === false) ? '?' : '&';
+						$url .= $glue . 'access=' . urlencode($token);
+					}
+					$links[] = ['title' => (string)$p->title, 'url' => $url, 'id' => (int)$p->id];
+				}
+				$session->set('pl_access_links', $links);
+			}
+	
+			// Send access summary mail (per policy)
+			if (!empty($links) && $this->shouldSendAccessMail($isNew)) {
+				$this->mail()->sendAccessSummaryMail($this, $buyer, $links);
+			}
+	
+			// Duplicate purchase notice
+			if ($alreadyDisallowed) $this->modal()->queueAlreadyPurchasedModal();
+	
+			// Mark session processed
+			$processed[] = $sessionId;
+			$session->set('pl_processed_sessions', $processed);
+	
+			$this->wire('log')->save(
+				self::LOG_PL,
+				'[INFO] Processed Stripe session ' .
+				json_encode([
+					'session'        => $sessionId,
+					'email'          => $email,
+					'mapped'         => count($allMapped),
+					'access'         => count($accessProducts),
+					'unmapped'       => $unmapped ? implode(', ', $unmapped) : '-',
+					'newUser'        => $isNew ? 'yes' : 'no',
+					'subPeriodEnd'   => $subscriptionPeriodEnd ?: '-',
+				], JSON_UNESCAPED_SLASHES)
+			);
+	
+		} catch (\Throwable $e) {
+			$this->wire('log')->save(self::LOG_PL, 'processCheckout error: '.$e->getMessage().' '.$sessionId);
+			return;
+		}
+	}
 
 	/**
 	  * Handles access tokens in ?access query parameter for soft logins or expired notices.
@@ -845,7 +851,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			 }
 			 if (is_file($layoutPath)) return $layoutPath;
 	 
-			 $this->wire('log')->save('mail', 'Mail layout not found: ' . $layoutPath . ' – using module default.');
+			 $this->wire('log')->save(self::LOG_MAIL, 'Mail layout not found: ' . $layoutPath . ' – using module default.');
 		 }
 		 return $this->moduleMailLayout;
 	 }
@@ -891,7 +897,6 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		return $this->apiService;
 	}
 
-	/* ========================= Model/Install helpers ========================= */
 
 	/**
 	 * Maps a Stripe checkout line item to a corresponding product Page in ProcessWire.
@@ -899,7 +904,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	 * @param mixed $li Stripe line item object.
 	 * @return Page|null The matched product Page or null if not found.
 	 */
-	private function mapStripeLineItemToProduct($li): ?\ProcessWire\Page {
+	public function mapStripeLineItemToProduct($li): ?\ProcessWire\Page {
 		$pages     = $this->wire('pages');
 		$sanitizer = $this->wire('sanitizer');
 
@@ -948,6 +953,8 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		}
 		return null;
 	}
+
+	/* ========================= Model/Install helpers ========================= */
 
 	/**
 	 * Ensures required user fields and repeater structure exist for purchases.
@@ -1014,7 +1021,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		$purchaseDate = $ensure('purchase_date', 'FieldtypeDatetime', ['label' => 'Purchase date']);
 		$purchaseLines = $ensure('purchase_lines', 'FieldtypeTextarea', [
 			'label' => 'Purchase lines',
-			'notes' => 'One line per line-item: PRODUCT_ID • QTY • PRODUCT_TITLE • TOTAL',
+			'notes' => 'One line per item: PRODUCT_ID • QTY • PRODUCT_TITLE • TOTAL • PERIOD END (for subscriptions)',
 		]);
 				
 		$repChanged = false;
@@ -1034,51 +1041,60 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	 * @param array|null $templateNames List of template names to ensure fields on.
 	 * @return void
 	 */
-	protected function ensureProductFields(?array $templateNames = null): void {
-		$fields     = $this->wire('fields');
-		$templates  = $this->wire('templates');
-		$modules    = $this->wire('modules');
-		$sanitizer  = $this->wire('sanitizer');
-
-		$ensure = function(string $name, string $typeClass, string $label = '') use ($fields, $modules): \ProcessWire\Field {
-			$f = $fields->get($name);
-			if(!$f || !$f->id) {
-				$f = new \ProcessWire\Field();
-				$f->name = $name;
-				$f->columnWidth = 33;
-				$f->type = $modules->get($typeClass);
-			}
-			if($label !== '') $f->label = $label;
-			$fields->save($f);
-			return $f;
-		};
-
-		$fStripe = $ensure('stripe_product_id',        'FieldtypeText',     'Stripe Product ID');
-		$fReq    = $ensure('requires_access',          'FieldtypeCheckbox', 'Product: requires access/delivery page');
-		$fAllow  = $ensure('allow_multiple_purchases', 'FieldtypeCheckbox', 'Product: allows multiple purchases');
-
-		if ($templateNames === null) {
-			$templateNames = (array)($this->productTemplateNames ?? []);
-		}
-		$templateNames = array_values(array_unique(array_filter(array_map(
-			fn($n) => $sanitizer->name($n), $templateNames
-		))));
-
-		foreach ($templateNames as $tplName) {
-			$t = $templates->get($tplName);
-			if(!$t || !$t->id) continue;
-
-			$fg = $t->fieldgroup;
-			$changed = false;
-
-			foreach ([$fStripe, $fReq, $fAllow] as $f) {
-				if(!$fg->has($f)) { $fg->add($f); $changed = true; }
-			}
-			if ($changed) $fg->save();
-		}
-	}
-	
-	/** Collect Stripe API keys from config (multi-line textarea). */
+	 protected function ensureProductFields(?array $templateNames = null): void {
+		 $fields     = $this->wire('fields');
+		 $templates  = $this->wire('templates');
+		 $modules    = $this->wire('modules');
+		 $sanitizer  = $this->wire('sanitizer');
+	 
+		 // Helper to create/update a field
+		 $ensure = function(string $name, string $typeClass, string $label = '') use ($fields, $modules): \ProcessWire\Field {
+			 $f = $fields->get($name);
+			 if(!$f || !$f->id) {
+				 $f = new \ProcessWire\Field();
+				 $f->name = $name;
+				 $f->columnWidth = 33;
+				 $f->type = $modules->get($typeClass);
+			 }
+			 if($label !== '') $f->label = $label;
+			 $fields->save($f);
+			 return $f;
+		 };
+	 
+		 // Create/ensure product fields
+		 $fStripe = $ensure('stripe_product_id',        'FieldtypeText',     'Stripe Product ID');
+		 $fReq    = $ensure('requires_access',          'FieldtypeCheckbox', 'Product: requires access/delivery page');
+		 $fAllow  = $ensure('allow_multiple_purchases', 'FieldtypeCheckbox', 'Product: allows multiple purchases');
+	 
+		 // Determine templates to attach to
+		 if ($templateNames === null) {
+			 $templateNames = (array)($this->productTemplateNames ?? []);
+		 }
+		 $templateNames = array_values(array_unique(array_filter(array_map(
+			 fn($n) => $sanitizer->name($n), $templateNames
+		 ))));
+	 
+		 foreach ($templateNames as $tplName) {
+			 /** @var \ProcessWire\Template|null $t */
+			 $t = $templates->get($tplName);
+			 if(!$t || !$t->id) continue;
+	 
+			 $fg = $t->fieldgroup;
+	 
+			 // Attach fields if missing
+			 $changed = false;
+			 foreach ([$fStripe, $fReq, $fAllow] as $f) {
+				 if(!$fg->has($f)) { $fg->add($f); $changed = true; }
+			 }
+			 if ($changed) $fg->save();
+	 
+			 // Context: show stripe_product_id only when requires_access=1
+			 $ctx = $fg->getFieldContext($fStripe);
+			 $ctx->showIf = 'requires_access=1';
+			 $fields->saveFieldgroupContext($ctx, $fg);
+		 }
+	 }	
+/** Collect Stripe API keys from config (multi-line textarea). */
 	private function getStripeKeys(): array {
 		$cfgKeys = $this->stripeApiKeys ?? [];
 		if (is_string($cfgKeys)) {
@@ -1087,19 +1103,28 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		return array_values(array_unique(array_filter(array_map('trim', (array) $cfgKeys))));
 	}
 	
-	/** Try to retrieve a Checkout Session using the first working key. */
-	private function retrieveCheckoutSessionWithKeys(string $sessionId, array $keys) {
-		if (!class_exists(\Stripe\Stripe::class)) return null;
-	
-		foreach ($keys as $apiKey) {
+	/**
+	 * Retrieve a checkout session using any configured key.
+	 * Returns an array with ['session' => \Stripe\Checkout\Session, 'client' => \Stripe\StripeClient].
+	 * We keep the client so we can fetch the subscription if it wasn't expanded.
+	 */
+	private function retrieveCheckoutSessionWithKeys(string $sessionId, array $keys): ?array {
+		foreach ($keys as $k) {
 			try {
-				\Stripe\Stripe::setApiKey($apiKey);
-				$session = \Stripe\Checkout\Session::retrieve([
-					'id'     => $sessionId,
-					'expand' => ['line_items.data.price.product', 'customer'],
+				$client = new \Stripe\StripeClient(['api_key' => $k]);
+				// Try with expansions first (line_items + customer + subscription)
+				$session = $client->checkout->sessions->retrieve($sessionId, [
+					'expand' => ['line_items.data.price.product', 'customer', 'subscription'],
 				]);
-				if (is_object($session) && !empty($session->id)) {
-					return $session;
+				return ['session' => $session, 'client' => $client];
+			} catch (\Stripe\Exception\ApiErrorException $e) {
+				// Fallback without expand
+				try {
+					$client = new \Stripe\StripeClient(['api_key' => $k]);
+					$session = $client->checkout->sessions->retrieve($sessionId);
+					return ['session' => $session, 'client' => $client];
+				} catch (\Throwable $e2) {
+					// try next key
 				}
 			} catch (\Throwable $e) {
 				// try next key
@@ -1108,10 +1133,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		return null;
 	}
 	
-	/** Small helper to JSON-escape strings safely for inline JS. */
-	private function jsq(string $s): string {
-		return json_encode($s, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-	}
+
 	/** Heuristics: detect if Bootstrap is already present (CSS or window.bootstrap marker later) */
 	private function detectBootstrapPresent(string $html): bool
 	{
@@ -1187,59 +1209,88 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		return (bool)($product->get('requires_access') ?? false);
 	}
 
-	/**
-	 * Checks if a user has purchased a given product, considering legacy and modern storage formats.
-	 *
-	 * @param User $user The user to check.
-	 * @param Page $product The product page.
-	 * @return bool True if the user has purchased the product.
+/**
+	 * Determines if the user currently has *active* access to a given product.
+	 * Logic:
+	 * - Only the most recent purchase for this product ID is evaluated.
+	 * - A pause flag (_paused) in the latest purchase always blocks access.
+	 * - If the latest purchase has a numeric period_end, it must be >= now.
+	 * - If no purchase has a period_end_map for this product but at least one
+	 *   purchase exists without it → treat as lifetime (one-time) purchase.
 	 */
-	protected function hasPurchasedProduct(User $user, Page $product): bool {
+	protected function hasActiveAccess(\ProcessWire\User $user, \ProcessWire\Page $product): bool {
 		if (!$user->hasField('spl_purchases') || !$user->spl_purchases->count()) return false;
-		$targetId = (int) $product->id;
+	
+		$pid   = (int) $product->id;
+		$now   = time();
+		$flag  = $pid . '_paused';
+	
+		$latestTs         = 0;
+		$latestPaused     = false;
+		$latestPeriodEnd  = null;
+		$sawAnyWithMap    = false;
+		$sawAnyWithoutMap = false;
 	
 		foreach ($user->spl_purchases as $p) {
-			try {
-				$ids = $p->meta('product_ids');
-				if (is_array($ids) && in_array($targetId, array_map('intval', $ids), true)) {
-					return true;
+			$ids = (array) $p->meta('product_ids');
+			if (!in_array($pid, array_map('intval', $ids), true)) continue;
+	
+			$pd  = (int) ($p->get('purchase_date') ?: $p->created ?: 0);
+			$map = (array) $p->meta('period_end_map');
+	
+			if (!empty($map) && array_key_exists($pid, $map)) {
+				$sawAnyWithMap = true;
+				// take only the most recent purchase
+				if ($pd >= $latestTs) {
+					$latestTs        = $pd;
+					$latestPaused    = array_key_exists($flag, $map);
+					$latestPeriodEnd = is_numeric($map[$pid]) ? (int)$map[$pid] : null;
 				}
-			} catch (\Throwable $e) {
+			} else {
+				// purchase without map (e.g. one-time or legacy purchase)
+				$sawAnyWithoutMap = true;
+				if ($pd >= $latestTs) {
+					$latestTs     = $pd;
+					$latestPaused = array_key_exists($flag, $map);
+					// no period_end value → lifetime type
+				}
+			}
+		}
+	
+		if ($latestTs === 0) return false;
+	
+		// paused → always block access
+		if ($latestPaused) return false;
+	
+		// latest purchase has a valid period_end → check expiry
+		if ($latestPeriodEnd !== null) {
+			return ($latestPeriodEnd >= $now);
+		}
+	
+		// no purchase with period_end_map but at least one without → treat as active (lifetime)
+		if (!$sawAnyWithMap && $sawAnyWithoutMap) {
+			return true;
+		}
+	
+		return false;
+	}
+	
+	/**
+	 * Checks if the user has ever purchased the product (historical, not active).
+	 */
+	protected function hasPurchasedProduct(\ProcessWire\User $user, \ProcessWire\Page $product): bool {
+		if (!$user->hasField('spl_purchases') || !$user->spl_purchases->count()) return false;
+		$pid = (int) $product->id;
+	
+		foreach ($user->spl_purchases as $p) {
+			$ids = (array) $p->meta('product_ids');
+			if (in_array($pid, array_map('intval', $ids), true)) {
+				return true;
 			}
 		}
 		return false;
 	}
-
-	/**
-	 * Attaches a purchase record to a user for a specific product and checkout session.
-	 *
-	 * @param User $user The user making the purchase.
-	 * @param Page $product The product purchased.
-	 * @param mixed $checkoutSession Stripe checkout session object/array.
-	 * @return void
-	 */
-	protected function attachPurchase(User $user, Page $product, $checkoutSession): void {
-		if (!$user->hasField('spl_purchases')) return;
-
-		$user->of(false);
-		$item = $user->spl_purchases->getNew();
-		$item->set('purchase_date', time());
-
-		$user->spl_purchases->add($item);
-		$this->wire('users')->save($user, ['quiet' => true]);
-
-		try {
-			$item->meta('stripe_session',
-				is_object($checkoutSession) && method_exists($checkoutSession, 'toArray')
-					? $checkoutSession->toArray()
-					: (array)$checkoutSession
-			);
-			$item->save();
-		} catch (\Throwable $e) {
-			$this->wire('log')->save(self::LOG_PL, 'attachPurchase meta warning: '.$e->getMessage());
-		}
-	}
-
+	 
 	/**
 	 * Ensures the "customer" role exists in ProcessWire and has page-view permission.
 	 *

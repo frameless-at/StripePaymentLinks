@@ -12,7 +12,253 @@ final class PLApiController {
 	public function __construct(StripePaymentLinks $mod) {
 		$this->mod = $mod;
 	}
+	
+	private function findUserByEmail(string $email): ?\ProcessWire\User {
+		$u = wire('users')->get('email=' . wire('sanitizer')->email(trim($email)));
+		return ($u && $u->id) ? $u : null;
+	}
 
+	/**
+	 * Finds a ProcessWire user by Stripe customer ID from stored checkout sessions.
+	 *
+	 * @param string $customerId The Stripe customer ID from the webhook event.
+	 * @return \ProcessWire\User|null Matching user or null if none found.
+	 */
+	 private function findUserByStripeCustomerId(string $customerId): ?\ProcessWire\User {
+		 if ($customerId === '') return null;
+		 $users = wire('users');
+	 
+		 foreach ($users as $u) {
+			 if (!$u->hasField('spl_purchases') || !$u->spl_purchases->count()) continue;
+	 
+			 foreach ($u->spl_purchases as $purchase) {
+				 $session = (array) $purchase->meta('stripe_session');
+				 $cust = $session['customer'] ?? null;
+	 
+				 if (is_string($cust) && $cust !== '') {
+					 $storedId = $cust;
+				 } elseif (is_array($cust) && !empty($cust['id'])) {
+					 $storedId = (string) $cust['id'];
+				 } elseif (is_object($cust) && !empty($cust->id)) {
+					 $storedId = (string) $cust->id;
+				 } else {
+					 $storedId = null;
+				 }
+	 
+				 if ($storedId === $customerId) {
+					 return $u;
+				 }
+			 }
+		 }
+		 return null;
+	 }
+	 	
+public function handleStripeWebhook(\ProcessWire\HookEvent $e): void {
+		 $e->replace = true;
+	 
+		 $payload   = file_get_contents('php://input') ?: '';
+		 $sigHeader = $_SERVER['HTTP_STRIPE_SIGNATURE'] ?? '';
+		 $secret    = (string)($this->mod->webhookSecret ?? '');
+	 
+		 if ($secret === '') {
+			 http_response_code(500);
+			 $e->return = 'Missing webhook secret';
+			 return;
+		 }
+	 
+		 try {
+			 if (!class_exists('\Stripe\Webhook')) {
+				 require_once ($this->mod->stripeSdkPath ?? (__DIR__ . '/../vendor/stripe-php/init.php'));
+			 }
+			 $event = \Stripe\Webhook::constructEvent($payload, $sigHeader, $secret);
+		 } catch (\Throwable $ex) {
+			 wire('log')->save(StripePaymentLinks::LOG_PL, '[WEBHOOK] signature error: ' . $ex->getMessage());
+			 http_response_code(400);
+			 $e->return = 'Invalid signature';
+			 return;
+		 }
+	 
+		 $type = (string)($event->type ?? '(unknown)');
+		 $obj  = $event->data->object ?? null;
+	 
+		 try {
+			 switch ($type) {
+	 
+				 /* =================== SUBSCRIPTION DELETED (cancelled immediately) =================== */
+				 case 'customer.subscription.deleted':
+					 $customerId = (string)($obj->customer ?? '');
+					 if (!$customerId) break;
+	 
+					 $u = $this->findUserByStripeCustomerId($customerId);
+					 if (!$u || !$u->id) {
+						 wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] canceled subscription: no user found for $customerId");
+						 break;
+					 }
+	 
+					 foreach ($u->spl_purchases as $p) {
+						 $map = (array)$p->meta('period_end_map');
+						 if (!$map) continue;
+						 $now = time();
+						 foreach ($map as $pid => $ts) {
+							 if (is_numeric($pid)) $map[$pid] = $now; // sofort sperren
+						 }
+						 // evtl. vorhandene *_paused Marker entfernen
+						 foreach (array_keys($map) as $k) {
+							 if (is_string($k) && substr($k, -7) === '_paused') unset($map[$k]);
+						 }
+						 $p->meta('period_end_map', $map);
+						 $p->save();
+					 }
+					 wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] subscription canceled for user {$u->id}");
+					 break;
+	 
+				 /* =================== SUBSCRIPTION UPDATED (pause/resume, cancel_at_period_end, misc) =================== */
+				 case 'customer.subscription.updated':
+					 $customerId = (string) ($obj->customer ?? '');
+					 if (!$customerId) { wire('log')->save(StripePaymentLinks::LOG_PL, '[WEBHOOK] updated: missing customer id'); break; }
+	 
+					 $u = $this->findUserByStripeCustomerId($customerId);
+					 if (!$u || !$u->id) { wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] updated: no user for $customerId"); break; }
+	 
+					 // (A) Pause/Resume via pause_collection
+					 $pausedNow = isset($obj->pause_collection) && $obj->pause_collection !== null;
+	 
+					 if ($pausedNow) {
+						 // Pausiert: für alle bekannten Produkt-IDs Marker setzen (einmalig)
+						 foreach ($u->spl_purchases as $p) {
+							 $map = (array)$p->meta('period_end_map');
+							 if (!$map) continue;
+							 $changed = false;
+							 foreach ($map as $pid => $ts) {
+								 if (is_numeric($pid)) {
+									 $flagKey = $pid . '_paused';
+									 if (!array_key_exists($flagKey, $map)) { $map[$flagKey] = 1; $changed = true; }
+								 }
+							 }
+							 if ($changed) { $p->meta('period_end_map', $map); $p->save(); }
+						 }
+						 wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] subscription paused for user {$u->id}");
+						 break;
+					 } else {
+						 // Fortgesetzt: alle *_paused Marker entfernen
+						 foreach ($u->spl_purchases as $p) {
+							 $map = (array)$p->meta('period_end_map');
+							 if (!$map) continue;
+							 $changed = false;
+							 foreach (array_keys($map) as $k) {
+								 if (is_string($k) && substr($k, -7) === '_paused') { unset($map[$k]); $changed = true; }
+							 }
+							 if ($changed) { $p->meta('period_end_map', $map); $p->save(); }
+						 }
+						 wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] subscription resumed for user {$u->id}");
+						 break;
+					 }
+	 
+					 // (B) cancel_at_period_end: Zugang bis Periodenende, danach Auto-Aus
+					 $cap = (bool)($obj->cancel_at_period_end ?? false);
+					 if ($cap) {
+						 $periodEnd = isset($obj->current_period_end) && is_numeric($obj->current_period_end) ? (int)$obj->current_period_end : null;
+						 if ($periodEnd) {
+							 foreach ($u->spl_purchases as $p) {
+								 $map = (array)$p->meta('period_end_map');
+								 if (!$map) continue;
+								 $changed = false;
+								 foreach ($map as $pid => $ts) {
+									 if (is_numeric($pid)) { $map[$pid] = $periodEnd; $changed = true; }
+								 }
+								 if ($changed) { $p->meta('period_end_map', $map); $p->save(); }
+							 }
+							 wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] updated (cancel_at_period_end=1) user {$u->id} → set period_end={$periodEnd}");
+						 }
+					 }
+					 $cancelAt   = isset($obj->cancel_at) && is_numeric($obj->cancel_at) ? (int)$obj->cancel_at : null;
+					 $periodEnd  = isset($obj->current_period_end) && is_numeric($obj->current_period_end) ? (int)$obj->current_period_end : null;
+					 
+					 $effectiveEnd = $cancelAt ?: $periodEnd;
+					 
+					 if ($effectiveEnd) {
+						 foreach ($u->spl_purchases as $p) {
+							 $map = (array)$p->meta('period_end_map');
+							 if (!$map) continue;
+							 $changed = false;
+							 foreach ($map as $pid => $ts) {
+								 if (is_numeric($pid)) {
+									 $map[$pid] = $effectiveEnd;
+									 $changed = true;
+								 }
+							 }
+							 if ($changed) { $p->meta('period_end_map', $map); $p->save(); }
+						 }
+						 wire('log')->save(
+							 StripePaymentLinks::LOG_PL,
+							 "[WEBHOOK] updated (manual end) user {$u->id} → set end=" . $effectiveEnd . " src=" . ($cancelAt ? 'cancel_at' : 'current_period_end')
+						 );
+					 }
+					 break;
+	 
+				 /* =================== INVOICE PAYMENT SUCCEEDED (renewal/extension) =================== */
+				 case 'invoice.payment_succeeded':
+					 $customerId = (string)($obj->customer ?? '');
+					 if (!$customerId) { wire('log')->save(StripePaymentLinks::LOG_PL, '[WEBHOOK] invoice.succeeded: missing customer id'); break; }
+	 
+					 $u = $this->findUserByStripeCustomerId($customerId);
+					 if (!$u || !$u->id) { wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] invoice.succeeded: no user for $customerId"); break; }
+	 
+					 // current_period_end kommt über $obj->lines->data[0]->period->end ODER über $obj->subscription (wenn expandet – hier meist nicht)
+					 $periodEnd = null;
+					 // Versuch 1: invoice.subscription via API-Ende; im Event-Objekt selbst ist es meist nur eine ID
+					 if (isset($obj->lines) && isset($obj->lines->data) && is_array($obj->lines->data) && count($obj->lines->data)) {
+						 $li0 = $obj->lines->data[0];
+						 if (isset($li0->period) && isset($li0->period->end) && is_numeric($li0->period->end)) {
+							 $periodEnd = (int)$li0->period->end;
+						 }
+					 }
+					 // no periodEnd --> ignore
+					 if ($periodEnd) {
+						 foreach ($u->spl_purchases as $p) {
+							 $map = (array)$p->meta('period_end_map');
+							 if (!$map) continue;
+							 $changed = false;
+							 foreach ($map as $pid => $ts) {
+								 if (is_numeric($pid)) {
+									 // Nur anheben, niemals verkürzen
+									 $old = is_numeric($ts) ? (int)$ts : 0;
+									 if ($periodEnd > $old) { $map[$pid] = $periodEnd; $changed = true; }
+								 }
+							 }
+							 if ($changed) { $p->meta('period_end_map', $map); $p->save(); }
+						 }
+						 wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] invoice.succeeded user {$u->id} → extended to {$periodEnd}");
+					 }
+					 break;
+	 
+				 /* =================== INVOICE PAYMENT FAILED (grace/at-risk) =================== */
+				 case 'invoice.payment_failed':
+					 $customerId = (string)($obj->customer ?? '');
+					 if (!$customerId) { wire('log')->save(StripePaymentLinks::LOG_PL, '[WEBHOOK] invoice.failed: missing customer id'); break; }
+	 
+					 $u = $this->findUserByStripeCustomerId($customerId);
+					 if (!$u || !$u->id) { wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] invoice.failed: no user for $customerId"); break; }
+	 
+					 wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] invoice.failed for user {$u->id} (no immediate lock)");
+					 break;
+	 
+				 default:
+					 wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] ignored event $type");
+					 break;
+			 }
+	 
+		 } catch (\Throwable $ex) {
+			 wire('log')->save(StripePaymentLinks::LOG_PL, '[WEBHOOK] handler error ' . $type . ': ' . $ex->getMessage());
+			 http_response_code(500);
+			 $e->return = 'Handler error';
+			 return;
+		 }
+	 
+		 http_response_code(200);
+		 $e->return = 'OK';
+	 }
+	 		
 	/**
 	 * Entry point for the URL hook (POST only).
 	 * Supported ops: login, set_password, reset_request, reset_password
