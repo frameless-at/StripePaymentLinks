@@ -16,6 +16,11 @@ final class PLModalService
 	/** @var ModalRenderer */
 	private ModalRenderer $ui;
 
+	/**
+	 * Constructor to initialize the modal service.
+	 *
+	 * @param StripePaymentLinks $mod Reference to the main StripePaymentLinks module.
+	 */
 	public function __construct(StripePaymentLinks $mod)
 	{
 		$this->mod = $mod;
@@ -29,7 +34,10 @@ final class PLModalService
 	}
 
 	/**
-	 * Convenience: central wrapper so StripePaymentLinks doesn’t need to know about ModalRenderer.
+	 * Helper method: renders modal via ModalRenderer.
+	 *
+	 * @param array $m Modal configuration array.
+	 * @return string Rendered HTML of the modal.
 	 */
 	private function renderModal(array $m): string
 	{
@@ -40,7 +48,9 @@ final class PLModalService
 	 * One-off notice queueing (stored in session; opened on next render())
 	 * -------------------------------------------------------------------*/
 
-	/** Queue “login required” notice that opens the login modal on sales page. */
+	/**
+	 * Queue "login required" notice that opens login modal on sales page.
+	 */
 	public function queueLoginRequiredModal(): void
 	{
 		$s = $this->mod->wire('session');
@@ -60,16 +70,19 @@ final class PLModalService
 				'<button class="btn btn-primary" data-bs-dismiss="modal" data-bs-toggle="modal" data-bs-target="#loginModal" type="button">'.$btnOpen.'</button>',
 		]);
 	}
-	
+
+	/**
+	 * Queue "already purchased" notice modal.
+	 */
 	public function queueAlreadyPurchasedModal(): void
 	{
 		$s = $this->mod->wire('session');
-	
+
 		$titleEsc = htmlspecialchars($this->mod->t('modal.already_purchased.title'), ENT_QUOTES, 'UTF-8');
 		$bodyHtml = $this->fillPlaceholders($this->mod->t('modal.already_purchased.body'), null);
-	
+
 		$btnClose = htmlspecialchars($this->mod->t('modal.notice.close'), ENT_QUOTES, 'UTF-8');
-	
+
 		$s->set('modal_notice', [
 			'id'     => 'alreadyPurchasedModal',
 			'title'  => $titleEsc,
@@ -77,32 +90,35 @@ final class PLModalService
 			'footer' => '<button class="btn btn-primary" data-bs-dismiss="modal" type="button">'.$btnClose.'</button>',
 		]);
 	}
-	
+
 	/**
-	 * Render notice if REset token is expired and auto-open it.
+	 * Render notice if reset token is expired and auto-open reset request modal.
+	 *
+	 * @param array $opts Optional configurations for placeholders.
 	 */
 	public function queueResetTokenExpiredModal(array $opts = []): void
 	{
 		$s = $this->mod->wire('session');
-	
+
 		$titleEsc = htmlspecialchars($this->mod->t('modal.resetexpired.title'), ENT_QUOTES, 'UTF-8');
 		$bodyHtml = $this->fillPlaceholders($this->mod->t('modal.resetexpired.body'), null);
-	
+
 		$btnClose   = htmlspecialchars($this->mod->t('modal.notice.close'), ENT_QUOTES, 'UTF-8');
 		$btnRequest = htmlspecialchars($this->mod->t('modal.resetexpired.request'), ENT_QUOTES, 'UTF-8');
-	
+
 		$s->set('modal_notice', [
 			'id'     => 'resetExpiredNotice',
 			'title'  => $titleEsc,
 			'body'   => $bodyHtml, // trusted HTML
 			'footer' =>
 				'<button class="btn btn-secondary" data-bs-dismiss="modal" type="button">'.$btnClose.'</button>'.
-				// open reset request modal after closing this one
 				'<button class="btn btn-primary" data-bs-dismiss="modal" data-bs-toggle="modal" data-bs-target="#resetRequestModal" type="button">'.$btnRequest.'</button>',
 		]);
 	}
-	
-	/** Queue “access link expired” notice that leads to login modal. */
+
+	/**
+	 * Queue "access link expired" notice that leads to login modal.
+	 */
 	public function queueExpiredAccessModal(): void
 	{
 		$s = $this->mod->wire('session');
@@ -124,7 +140,9 @@ final class PLModalService
 	}
 
 	/**
-	 * Render queued notice (if any) and auto-open it.
+	 * Render queued notice modal (if any) and auto-open it.
+	 *
+	 * @return string Rendered modal HTML + auto-open script.
 	 */
 	public function renderModalNotice(): string
 	{
@@ -143,11 +161,11 @@ final class PLModalService
 		$html = $this->renderModal([
 			'id'     => $id,
 			'title'  => $title,
-			'body'   => $body,     // trusted HTML
-			'footer' => $footer,   // trusted HTML
+			'body'   => $body,
+			'footer' => $footer,
 		]);
 
-		// Auto-open + optional “open next modal after close”
+		// Auto-open script and optional “open next modal after close”
 		$html .= '<script>
 		  (function(){
 			var id = "'. addslashes($id) .'";
@@ -181,14 +199,16 @@ final class PLModalService
 	 * -------------------------------------------------------------------*/
 
 	/**
-	 * Build the access buttons block (without modal).
-	 * @param array $links [ ['title'=>..., 'url'=>..., 'id'=>int], ... ]
+	 * Render the access buttons block (excluding modals).
+	 *
+	 * @param array $links Array of ['title'=>string, 'url'=>string, 'id'=>int].
+	 * @return string HTML markup with deduplicated buttons.
 	 */
 	public function renderAccessButtonsBlock(array $links): string
 	{
 		if (!$links) return '';
 
-		// Deduplicate by product id
+		// Deduplicate by product ID
 		$uniq = [];
 		foreach ($links as $l) {
 			$id = (int)($l['id'] ?? 0);
@@ -201,23 +221,23 @@ final class PLModalService
 		$prodFallback = $this->mod->t('mail.common.product_fallback');
 
 		if (count($links) === 1) {
-			$l       = $links[0];
-			$title   = $esc($l['title'] ?? $prodFallback);
-			$url     = $esc($l['url']   ?? '#');
-			$hint    = $esc($this->mod->t('ui.access.single_hint'));
-			return '<div class="pl-access-block text-center my-5"><p>'.$hint.'</p>'
-				. '<p><a class="btn btn-primary btn-lg" href="'.$url.'">'.$title.'</a></p></div>';
+			$l = $links[0];
+			$title = $esc($l['title'] ?? $prodFallback);
+			$url = $esc($l['url'] ?? '#');
+			$hint = $esc($this->mod->t('ui.access.single_hint'));
+			return '<div class="pl-access-block text-center my-5"><p>' . $hint . '</p>'
+				. '<p><a class="btn btn-primary btn-lg" href="' . $url . '">' . $title . '</a></p></div>';
 		}
 
-		$hint  = $esc($this->mod->t('ui.access.multi_hint'));
-		$btns  = [];
+		$hint = $esc($this->mod->t('ui.access.multi_hint'));
+		$btns = [];
 		foreach ($links as $l) {
 			$title = $esc($l['title'] ?? $prodFallback);
-			$url   = $esc($l['url']   ?? '#');
-			$btns[] = '<a class="btn btn-primary btn-lg mb-2" target="_blank" href="'.$url.'">'.$title.'</a>';
+			$url = $esc($l['url'] ?? '#');
+			$btns[] = '<a class="btn btn-primary btn-lg mb-2" target="_blank" href="' . $url . '">' . $title . '</a>';
 		}
 
-		return '<div class="pl-access-block text-center my-5"><p>'.$hint.'</p><p>'
+		return '<div class="pl-access-block text-center my-5"><p>' . $hint . '</p><p>'
 			. implode(' ', $btns)
 			. '</p></div>';
 	}
@@ -226,14 +246,18 @@ final class PLModalService
 	 * Modals (login / reset request / reset set / set password)
 	 * -------------------------------------------------------------------*/
 
-	/** Login modal */
+	/**
+	 * Render login modal form.
+	 *
+	 * @param array $opts Options including 'action' and 'redirect_url'.
+	 * @return string Rendered modal HTML.
+	 */
 	public function modalLogin(array $opts): string
 	{
 		$pages   = $this->mod->wire('pages');
 		$session = $this->mod->wire('session');
 
 		$intended = (string) ($session->get('pl_intended_url') ?: ($opts['redirect_url'] ?? $pages->get('/')->httpUrl));
-
 		$h = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
 
 		$title  = $this->mod->t('modal.login.title');
@@ -266,7 +290,12 @@ final class PLModalService
 		return $this->renderModal($modal);
 	}
 
-	/** Password reset request modal */
+	/**
+	 * Render password reset request modal form.
+	 *
+	 * @param array $opts Options including 'action' and 'return_url'.
+	 * @return string Rendered modal HTML.
+	 */
 	public function modalResetRequest(array $opts): string
 	{
 		$title  = $this->mod->t('modal.resetreq.title');
@@ -291,14 +320,19 @@ final class PLModalService
 		]);
 	}
 
-	/** Set new password via reset token (opened from ?reset=TOKEN) */
-public function modalResetSet(array $opts): string
+	/**
+	 * Render password reset form modal, opened with reset token.
+	 *
+	 * @param array $opts Options including 'action', 'username', 'token'.
+	 * @return string Rendered modal HTML.
+	 */
+	public function modalResetSet(array $opts): string
 	{
 		$title  = $this->mod->t('modal.resetset.title');
 		$body   = $this->mod->t('modal.resetset.body');
 		$btn    = $this->mod->t('modal.resetset.submit');
 		$cancel = $this->mod->t('modal.notice.cancel');
-	
+
 		return $this->renderModal([
 			'id'    => 'resetSetModal',
 			'title' => htmlspecialchars($title, ENT_QUOTES, 'UTF-8'),
@@ -318,18 +352,25 @@ public function modalResetSet(array $opts): string
 		]);
 	}
 
-	/** Set password immediately after purchase (requires logged-in user) */
+	/**
+	 * Render "set new password" modal immediately after purchase.
+	 *
+	 * Requires a logged-in user.
+	 *
+	 * @param array $opts Options including 'user', 'action'.
+	 * @return string Rendered modal HTML.
+	 */
 	public function modalSetPassword(array $opts): string
 	{
 		/** @var \ProcessWire\User|null $u */
 		$u = $opts['user'] ?? null;
-	
+
 		$h      = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
 		$title  = $this->mod->t('modal.setpwd.title');
 		$intro  = $this->mod->t('modal.setpwd.intro');
 		$btn    = $this->mod->t('modal.setpwd.btn_submit');
 		$cancel = $this->mod->t('modal.notice.cancel');
-	
+
 		$modal = [
 			'id'    => 'setPassModal',
 			'title' => $h($title),
@@ -346,11 +387,11 @@ public function modalResetSet(array $opts): string
 				'footerClass'=> 'modal-footer bg-light-subtle',
 			],
 		];
-	
+
 		if (trim($intro) !== '') {
 			$modal['form']['bodyIntro'] = $this->fillPlaceholders($intro, $u);
 		}
-	
+
 		return $this->renderModal($modal);
 	}
 
@@ -358,7 +399,14 @@ public function modalResetSet(array $opts): string
 	 * JS helper
 	 * -------------------------------------------------------------------*/
 
-	/** Global fetch-based AJAX handler for modal forms. */
+	/**
+	 * Global fetch-based AJAX handler for modal forms.
+	 *
+	 * Handles submitting modal forms via AJAX, displaying success or error messages,
+	 * redirecting, and closing modals on success.
+	 *
+	 * @return string JavaScript code for global AJAX handling.
+	 */
 	public function globalAjaxHandlerJs(): string
 	{
 		$errGeneric = json_encode($this->mod->t('ui.ajax.error_generic'), JSON_UNESCAPED_UNICODE);
@@ -411,19 +459,23 @@ HTML;
 	 * -------------------------------------------------------------------*/
 
 	/**
-	 * Replace {firstname} and {email} in text, HTML-escaping outer string
-	 * and bolding replacements. User may be null.
+	 * Replace placeholders {firstname} and {email} in text,
+	 * escaping the outer string and wrapping replacements in bold tags.
+	 *
+	 * @param string $text Input text with placeholders.
+	 * @param \ProcessWire\User|null $u Optional user for replacement variables.
+	 * @return string HTML escaped output with placeholders replaced.
 	 */
 	private function fillPlaceholders(string $text, ?\ProcessWire\User $u = null): string
 	{
-		// Mark tokens, escape, then restore with bold replacements.
+		// Mark placeholder tokens, escape the text, then replace placeholders wrapped in <b>
 		$withTokens = strtr($text, ['{firstname}' => '%%FIRSTNAME%%', '{email}' => '%%EMAIL%%']);
 		$escaped    = htmlspecialchars($withTokens, ENT_QUOTES, 'UTF-8');
 
 		$firstname = $u ? $this->displayName($u) : '';
 		$email     = $u ? (string)$u->email     : '';
 		$fnEsc     = htmlspecialchars($firstname, ENT_QUOTES, 'UTF-8');
-		$emEsc     = htmlspecialchars($email,     ENT_QUOTES, 'UTF-8');
+		$emEsc     = htmlspecialchars($email, ENT_QUOTES, 'UTF-8');
 
 		$out = strtr($escaped, [
 			'%%FIRSTNAME%%' => ($fnEsc !== '' ? '<b>'.$fnEsc.'</b>' : ''),
@@ -433,7 +485,12 @@ HTML;
 		return '<p>'.$out.'</p>';
 	}
 
-	/** Nicely formatted display name used in placeholders. */
+	/**
+	 * Generate a display name for a user, preferring title field or email prefix.
+	 *
+	 * @param \ProcessWire\User $user The user to generate display name for.
+	 * @return string The display name.
+	 */
 	private function displayName(\ProcessWire\User $user): string
 	{
 		if ($user->hasField('title') && $user->title) return trim((string)$user->title);
