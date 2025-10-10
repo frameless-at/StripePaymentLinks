@@ -38,7 +38,6 @@ class PLMailService
 			'closingText'   => $mod->t('mail.common.closing_text'),
 			'signatureName' => (string)($mod->mailSignatureName ?? $mod->mailFromName ?? ''),
 			'directLabel'   => $mod->t('mail.common.direct_link'),
-			'greeting'      => $mod->t('mail.common.greeting'),
 			'extraCtas'     => $isMulti ? array_map(
 				fn($l) => ['title' => (string)($l['title'] ?? ''), 'url' => (string)($l['url'] ?? '#')],
 				array_slice($links, 1)
@@ -58,9 +57,13 @@ class PLMailService
 		$m->body(strtr("{$vars['leadText']}\n\n{$vars['productUrl']}\n\n{$vars['closingText']}\n{$vars['signatureName']}\n", $repl));
 	
 		try {
-			return (bool)$m->send();
+			$sent = (bool)$m->send();
+			if ($sent) {
+				$mod->wire('log')->save('mail', '[OK] Access email successfully sent to ' . $user->email);
+			}
+			return $sent;
 		} catch (\Throwable $e) {
-			$mod->wire('log')->save('mail', '[ERROR] Access email send error: '.$e->getMessage());
+			$mod->wire('log')->save('mail', '[ERROR] Access email send error: ' . $e->getMessage());
 			return false;
 		}
 	}
@@ -88,7 +91,6 @@ class PLMailService
 			'fromName'      => (string)($mod->mailFromName ?? ($config->siteName ?? $config->httpHost ?? 'Website')),
 			'brandHeader'   => (string)($mod->mailHeaderName ?? ''),
 			'headerTagline' => $mod->t('mail.common.header_tagline'),
-			'greeting'      => $mod->t('mail.common.greeting'),
 			'closingText'   => $mod->t('mail.resetpwd.notice'),
 		];
 	
@@ -109,9 +111,13 @@ class PLMailService
 		$m->body($vars['leadText'] . "\n\n" . $resetUrl);
 	
 		try {
-			return (bool)$m->send();
+			$sent = (bool)$m->send();
+			if ($sent) {
+				$mod->wire('log')->save('mail', '[OK] Reset password email successfully sent to ' . $user->email);
+			}
+			return $sent;
 		} catch (\Throwable $e) {
-			$mod->wire('log')->save('mail', '[ERROR] Password reset email send error: ' . $e->getMessage());
+			$mod->wire('log')->save('mail', '[ERROR] Reset password email send error: ' . $e->getMessage());
 			return false;
 		}
 	}
