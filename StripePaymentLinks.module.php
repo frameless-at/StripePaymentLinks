@@ -34,7 +34,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	public static function getModuleInfo(): array {
 		return [
 			'title'       => 'StripePaymentLinks',
-			'version'     => '1.0.9', 
+			'version'     => '1.0.10', 
 			'summary'     => 'Stripe payment-link redirects, user/purchases, magic link, mails, modals.',
 			'author'      => 'frameless Media',
 			'autoload'    => true,
@@ -214,6 +214,16 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			$this->ensureProductFields($data['productTemplateNames'] ?? null);
 			$this->ensureCustomerRoleExists();
 			$this->triggerSyncStripeCustomers($data);
+		});
+		$this->addHookAfter('Pages::saveReady', function(\ProcessWire\HookEvent $event) {
+			$page = $event->arguments(0);
+			$productTemplates = array_map('trim', $this->productTemplateNames ?? []);
+			if (in_array($page->template->name, $productTemplates)
+				&& $page->isChanged('requires_access')
+				&& $page->requires_access
+				&& !empty($page->stripe_product_id)){
+					$this->updateUserAccessAndNotify($page);
+			}
 		});
 	}
 	
@@ -1445,4 +1455,131 @@ public function processCheckout(Page $currentPage): void {
 		$data['pl_sync_run'] = false;
 		$this->modules->saveConfig('StripePaymentLinks', $data);
 	  }
+	  
+	  /**
+	   * When a product gets switched to "requires_access", migrate past purchases
+	   * that referenced the Stripe product id as unmapped ("0#<stripeId>") to the
+	   * real Page ID scope, and notify affected users with an access mail.
+	   *
+	   * @param \ProcessWire\Page $product
+	   * @return void
+	   */
+	   protected function updateUserAccessAndNotify(\ProcessWire\Page $product): void{
+		   $pid      = (int) $product->id;
+		   $stripeId = trim((string) $product->get('stripe_product_id'));
+	   
+		   $users = $this->wire('users');
+	   
+		   /** @var \ProcessWire\User[]|\ProcessWire\PageArray $candidates */
+		   $candidates = $users->find("spl_purchases.count>0");
+	   
+		   foreach ($candidates as $u) {
+			   $userAffected = false;
+	   
+			   if (!$u->hasField('spl_purchases') || !$u->spl_purchases->count()) {
+				   continue;
+			   }
+	   
+			   foreach ($u->spl_purchases as $item) {
+				   if (!$item || !$item->id) continue;
+	   
+				   // Read stored session meta
+				   $sessionMeta = (array) $item->meta('stripe_session');
+				   if (!$sessionMeta) continue;
+	   
+				   // Does this purchase include THIS Stripe product?
+				   $lineItems = $sessionMeta['line_items']['data'] ?? [];
+				   if (!is_array($lineItems) || !$lineItems) continue;
+	   
+				   $containsTarget = false;
+				   foreach ($lineItems as $li) {
+					   if (!is_array($li)) continue;
+					   $pp  = $li['price']['product'] ?? null;
+					   $sid = is_array($pp) ? (string)($pp['id'] ?? '') : (is_string($pp) ? $pp : '');
+					   if ($sid !== '' && $sid === $stripeId) { $containsTarget = true; break; }
+				   }
+				   if (!$containsTarget) continue;
+	   
+				   $userAffected = true;
+	   
+				   // 1) Ensure product_ids contains the real PID
+				   $productIds = array_map('intval', (array) $item->meta('product_ids'));
+				   if (!in_array($pid, $productIds, true)) {
+					   $productIds[] = $pid;
+					   $productIds   = array_values(array_unique($productIds));
+					   $item->meta('product_ids', $productIds);
+				   }
+	   
+				   // 2) Migrate period_end_map scope from "0#<stripeId>" → "<pid>" and flags
+				   $map    = (array) $item->meta('period_end_map');
+				   $oldKey = '0#' . $stripeId;
+				   $newKey = (string) $pid;
+	   
+				   $oldPausedKey   = $oldKey . '_paused';
+				   $oldCanceledKey = $oldKey . '_canceled';
+				   $newPausedKey   = $newKey . '_paused';
+				   $newCanceledKey = $newKey . '_canceled';
+	   
+				   // Move/merge end timestamp (never shorten)
+				   $existingNewEnd = isset($map[$newKey]) && is_numeric($map[$newKey]) ? (int) $map[$newKey] : 0;
+				   $existingOldEnd = isset($map[$oldKey]) && is_numeric($map[$oldKey]) ? (int) $map[$oldKey] : 0;
+				   if ($existingOldEnd > 0) {
+					   $map[$newKey] = max($existingNewEnd, $existingOldEnd);
+					   unset($map[$oldKey]);
+				   }
+	   
+				   // Move flags (canceled dominates paused)
+				   $hadOldCanceled = array_key_exists($oldCanceledKey, $map);
+				   $hadOldPaused   = array_key_exists($oldPausedKey, $map);
+				   if ($hadOldCanceled || $hadOldPaused) {
+					   if ($hadOldCanceled) unset($map[$oldCanceledKey]);
+					   if ($hadOldPaused)   unset($map[$oldPausedKey]);
+	   
+					   if ($hadOldCanceled) {
+						   unset($map[$newPausedKey]);
+						   $map[$newCanceledKey] = 1;
+					   } elseif ($hadOldPaused) {
+						   if (!array_key_exists($newCanceledKey, $map)) {
+							   $map[$newPausedKey] = 1;
+						   }
+					   }
+				   }
+	   
+				   // Persist updated map (even if identical, harmless) and ALWAYS rebuild lines
+				   $item->meta('period_end_map', $map);
+				   try { $item->of(false); } catch (\Throwable $e) {}
+				   $this->plRebuildLinesAndSave($item, [
+					   $stripeId => (int)$pid,   
+				   ]);
+			   }
+	   
+			   // If user had at least one matching purchase, ALWAYS send access email
+			   if ($userAffected) {
+				   $links = [];
+				   $url   = $product->httpUrl;
+	   
+				   // Optional: attach a short-lived magic-link for convenience
+				   $ttlMinutes = (int)($this->accessTokenTtlMinutes ?? 30);
+				   try {
+					   $token = $this->createAccessToken($u, max(60, $ttlMinutes * 60));
+					   $glue  = (strpos($url, '?') === false) ? '?' : '&';
+					   $url  .= $glue . 'access=' . urlencode($token);
+				   } catch (\Throwable $e) {
+					   // best effort; ignore on failure
+				   }
+	   
+				   $links[] = [
+					   'title' => (string) $product->title,
+					   'url'   => $url,
+					   'id'    => $pid,
+				   ];
+	   
+				   try {
+					   $this->mail()->sendAccessSummaryMail($this, $u, $links);
+				   } catch (\Throwable $e) {
+					   // mail best effort; ignore on failure
+				   }
+			   }
+		   }
+	   }
  }

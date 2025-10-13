@@ -101,59 +101,65 @@ trait PLPurchaseLineHelper {
    * @param \ProcessWire\Page $purchaseItem  The purchase repeater item.
    * @return string[]                         Array of formatted lines.
    */
-  private function buildPurchaseLinesFromMeta(\ProcessWire\Page $purchaseItem): array {
-	$session = $purchaseItem->meta('stripe_session');
-	if (!is_array($session)) {
-	  return [];
-	}
 
-	$periodEndMap = (array) $purchaseItem->meta('period_end_map');
-	$linesIn = $session['line_items']['data'] ?? [];
-	if (!is_array($linesIn) || empty($linesIn)) {
-	  return [];
-	}
-
-	$sessCurrency = strtoupper((string) ($session['currency'] ?? 'EUR'));
-	$out = [];
-
-	foreach ($linesIn as $li) {
-	  if (!is_array($li)) {
-		continue;
-	  }
-
-	  $scope = $this->scopeKeyForArrayLineItem($li);
-	  $qty = max(1, (int) ($li['quantity'] ?? 1));
-	  $name = (string) ($li['price']['product']['name'] ?? ($li['description'] ?? 'Item'));
-
-	  $cents = (int) ($li['amount_total'] ?? ($li['amount'] ?? 0));
-	  $cur = strtoupper((string) ($li['currency'] ?? $sessCurrency));
-	  $amountStr = number_format($cents / 100, 2, '.', '') . ' ' . $cur;
-
-	  $st = $this->bestEndAndFlagsForScopeKey($scope, $periodEndMap);
-	  $suffix = '';
-	  if ($st['canceled']) {
-		$suffix = ' • CANCELED' . ($st['end'] ? (' (' . gmdate('Y-m-d', $st['end']) . ')') : '');
-	  } elseif ($st['paused']) {
-		$suffix = ' • PAUSED';
-	  } elseif ($st['end']) {
-		$suffix = ' • ' . gmdate('Y-m-d', $st['end']);
-	  }
-
-	  $out[] = "{$scope} • {$qty} • {$name} • {$amountStr}{$suffix}";
-	}
-
-	return $out;
-  }
-
+   private function buildPurchaseLinesFromMeta(\ProcessWire\Page $purchaseItem, array $scopeOverrides = []): array {
+	   $session = $purchaseItem->meta('stripe_session');
+	   if (!is_array($session)) {
+		 return [];
+	   }
+   
+	   $periodEndMap = (array) $purchaseItem->meta('period_end_map');
+	   $linesIn = $session['line_items']['data'] ?? [];
+	   if (!is_array($linesIn) || empty($linesIn)) {
+		 return [];
+	   }
+   
+	   $sessCurrency = strtoupper((string) ($session['currency'] ?? 'EUR'));
+	   $out = [];
+   
+	   foreach ($linesIn as $li) {
+		 if (!is_array($li)) continue;
+   
+		 // 1) Standard-Scope ermitteln (pid oder "0#<sid>")
+		 $scope = $this->scopeKeyForArrayLineItem($li);
+   
+		 // 2) OVERRIDE anwenden, falls für diese Stripe-Produkt-ID vorhanden
+		 $sid = $this->arrayStripeProductId($li);
+		 if ($sid !== '' && isset($scopeOverrides[$sid]) && (int)$scopeOverrides[$sid] > 0) {
+		   $scope = (string)(int)$scopeOverrides[$sid];
+		 }
+   
+		 $qty  = max(1, (int) ($li['quantity'] ?? 1));
+		 $name = (string) ($li['price']['product']['name'] ?? ($li['description'] ?? 'Item'));
+   
+		 $cents = (int) ($li['amount_total'] ?? ($li['amount'] ?? 0));
+		 $cur   = strtoupper((string) ($li['currency'] ?? $sessCurrency));
+		 $amountStr = number_format($cents / 100, 2, '.', '') . ' ' . $cur;
+   
+		 $st = $this->bestEndAndFlagsForScopeKey($scope, $periodEndMap);
+		 $suffix = '';
+		 if ($st['canceled']) {
+		   $suffix = ' • CANCELED' . ($st['end'] ? (' (' . gmdate('Y-m-d', $st['end']) . ')') : '');
+		 } elseif ($st['paused']) {
+		   $suffix = ' • PAUSED';
+		 } elseif ($st['end']) {
+		   $suffix = ' • ' . gmdate('Y-m-d', $st['end']);
+		 }
+   
+		 $out[] = "{$scope} • {$qty} • {$name} • {$amountStr}{$suffix}";
+	   }
+   
+	   return $out;
+   }
   /**
    * Rebuild purchase_lines field without saving the page.
    *
    * @param \ProcessWire\Page $purchaseItem  The purchase repeater item.
    */
-  private function rebuildAndSetPurchaseLines(\ProcessWire\Page $purchaseItem): void {
-	$rebuilt = $this->buildPurchaseLinesFromMeta($purchaseItem);
-	$purchaseItem->set('purchase_lines', implode("\n", $rebuilt));
-  }
+   private function rebuildAndSetPurchaseLines(\ProcessWire\Page $purchaseItem, array $scopeOverrides = []): void {
+	 $rebuilt = $this->buildPurchaseLinesFromMeta($purchaseItem, $scopeOverrides);
+	 $purchaseItem->set('purchase_lines', implode("\n", $rebuilt));
+   }
 
   /**
    * Normalize session object or array into a consistent array.
@@ -171,15 +177,16 @@ trait PLPurchaseLineHelper {
 	return is_array($session) ? $session : [];
   }
 
-  /**
+/**
    * Write metas (product_ids, stripe_session, period_end_map) and rebuild lines.
    *
    * @param \ProcessWire\Page $item
-   * @param mixed              $session       Stripe session object/array.
-   * @param int[]              $productIds    Mapped product page IDs.
-   * @param int|null           $effectiveEnd  Timestamp to set as period end.
-   * @param bool|null          $paused        Pause flag.
-   * @param bool|null          $canceled      Cancel flag.
+   * @param mixed             $session         Stripe session object/array.
+   * @param int[]             $productIds      Mapped product page IDs.
+   * @param int|null          $effectiveEnd    Timestamp to set as period end.
+   * @param bool|null         $paused          Pause flag.
+   * @param bool|null         $canceled        Cancel flag.
+   * @param array             $scopeOverrides  Optional map ['<stripe_product_id>' => <pid>]
    */
   private function plWriteMetasAndRebuild(
 	\ProcessWire\Page $item,
@@ -187,13 +194,12 @@ trait PLPurchaseLineHelper {
 	array $productIds = [],
 	?int $effectiveEnd = null,
 	?bool $paused = null,
-	?bool $canceled = null
+	?bool $canceled = null,
+	array $scopeOverrides = []
   ): void {
-	if (!$item || !$item->id) {
-	  return;
-	}
+	if (!$item || !$item->id) return;
 	$item->of(false);
-
+  
 	// 1) Normalize session
 	if (is_object($session) && method_exists($session, 'toArray')) {
 	  $session = $session->toArray();
@@ -202,15 +208,13 @@ trait PLPurchaseLineHelper {
 	  $session = (array) $session;
 	}
 	$sessionArr = is_array($session) ? $session : [];
-
+  
 	// 2) Ensure product_ids meta
 	if (empty($productIds)) {
 	  $linesIn = $sessionArr['line_items']['data'] ?? [];
 	  if (is_array($linesIn)) {
 		foreach ($linesIn as $li) {
-		  if (!is_array($li)) {
-			continue;
-		  }
+		  if (!is_array($li)) continue;
 		  $productIds[] = (int) $this->pidForArrayLineItem($li);
 		}
 	  }
@@ -218,34 +222,36 @@ trait PLPurchaseLineHelper {
 	}
 	$item->meta('product_ids', $productIds);
 	$item->meta('stripe_session', $sessionArr);
-
+  
 	// 3) Collect scope keys
 	$scopeKeys = [];
 	$linesIn = $sessionArr['line_items']['data'] ?? [];
 	if (is_array($linesIn)) {
 	  foreach ($linesIn as $li) {
-		if (!is_array($li)) {
+		if (!is_array($li)) continue;
+		// Falls ein Override für diese SID existiert, erzwinge die PID als Scope-Key
+		$sid = $this->arrayStripeProductId($li);
+		if ($sid !== '' && isset($scopeOverrides[$sid]) && (int)$scopeOverrides[$sid] > 0) {
+		  $scopeKeys[] = (string)(int)$scopeOverrides[$sid];
 		  continue;
 		}
 		$scope = $this->scopeKeyForArrayLineItem($li);
-		if ($scope !== '') {
-		  $scopeKeys[] = $scope;
-		}
+		if ($scope !== '') $scopeKeys[] = $scope;
 	  }
 	}
 	$scopeKeys = array_values(array_unique($scopeKeys));
-
+  
 	// 4) Update period_end_map only for exact scope keys
 	$map = (array) $item->meta('period_end_map');
 	foreach ($scopeKeys as $k) {
 	  $pKey = $k . '_paused';
 	  $cKey = $k . '_canceled';
-
+  
 	  // Raise end only
 	  if ($effectiveEnd) {
-		$map[$k] = max((int) ($map[$k] ?? 0), $effectiveEnd);
+		$map[$k] = max((int)($map[$k] ?? 0), $effectiveEnd);
 	  }
-
+  
 	  // Flags: canceled dominates paused
 	  if ($canceled === true) {
 		unset($map[$pKey]);
@@ -266,9 +272,9 @@ trait PLPurchaseLineHelper {
 	  }
 	}
 	$item->meta('period_end_map', $map);
-
-	// 5) Rebuild purchase_lines and save
-	$rebuilt = $this->buildPurchaseLinesFromMeta($item);
+  
+	// 5) Rebuild purchase_lines and save (mit Overrides)
+	$rebuilt = $this->buildPurchaseLinesFromMeta($item, $scopeOverrides);
 	$item->set('purchase_lines', implode("\n", $rebuilt));
 	$this->wire('pages')->save($item);
   }
@@ -278,14 +284,15 @@ trait PLPurchaseLineHelper {
    *
    * @param \ProcessWire\Page $item
    */
-  private function plRebuildLinesAndSave(\ProcessWire\Page $item): void {
-	if (!$item || !$item->id) {
-	  return;
-	}
-	$item->of(false);
-	$rebuilt = $this->buildPurchaseLinesFromMeta($item);
-	$item->set('purchase_lines', implode("\n", $rebuilt));
-	$this->wire('pages')->save($item);
-  }
+
+   private function plRebuildLinesAndSave(\ProcessWire\Page $item, array $scopeOverrides = []): void {
+	   if (!$item || !$item->id) {
+		 return;
+	   }
+	   $item->of(false);
+	   $rebuilt = $this->buildPurchaseLinesFromMeta($item, $scopeOverrides);
+	   $item->set('purchase_lines', implode("\n", $rebuilt));
+	   $this->wire('pages')->save($item);
+   }
 
 }
