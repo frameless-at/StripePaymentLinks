@@ -43,7 +43,10 @@ class PLMailService
 				array_slice($links, 1)
 			) : [],
 		];
-	
+		$p = $mod->wire('pages')->get((int)$links[0]['id']);
+		if ($p && $p->hasField('access_mail_addon_txt')) {
+			$vars['leadText'] = trim((string)$p->access_mail_addon_txt) . "\n\n" . ($vars['leadText'] ?? '');
+		}
 		$html = $this->renderLayout($mod->mailLayoutPath(), $vars);
 	
 		$m = $mail->new();

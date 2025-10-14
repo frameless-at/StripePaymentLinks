@@ -281,6 +281,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			'allow_multiple_purchases',
 			'requires_access',
 			'stripe_product_id',
+			'access_mail_addon_txt',
 		];
 	
 		// --- helper: field usage across all templates ---
@@ -1093,7 +1094,8 @@ public function processCheckout(Page $currentPage): void {
 		 $fStripe = $ensure('stripe_product_id',        'FieldtypeText',     'Stripe Product ID');
 		 $fReq    = $ensure('requires_access',          'FieldtypeCheckbox', 'Product: requires access/delivery page');
 		 $fAllow  = $ensure('allow_multiple_purchases', 'FieldtypeCheckbox', 'Product: allows multiple purchases');
-	 
+	 	 $fAddon  = $ensure('access_mail_addon_txt',    'FieldtypeText',     'Access Mail Addon Text');
+
 		 // Determine templates to attach to
 		 if ($templateNames === null) {
 			 $templateNames = (array)($this->productTemplateNames ?? []);
@@ -1111,7 +1113,7 @@ public function processCheckout(Page $currentPage): void {
 	 
 			 // Attach fields if missing
 			 $changed = false;
-			 foreach ([$fStripe, $fReq, $fAllow] as $f) {
+			 foreach ([$fStripe, $fReq, $fAllow, $fAddon] as $f) {
 				 if(!$fg->has($f)) { $fg->add($f); $changed = true; }
 			 }
 			 if ($changed) $fg->save();
@@ -1120,6 +1122,10 @@ public function processCheckout(Page $currentPage): void {
 			 $ctx = $fg->getFieldContext($fStripe);
 			 $ctx->showIf = 'requires_access=1';
 			 $fields->saveFieldgroupContext($ctx, $fg);
+			 
+			 $ctxAddon = $fg->getFieldContext($fAddon);
+			 $ctxAddon->columnWidth = 100;
+			 $fields->saveFieldgroupContext($ctxAddon, $fg);
 		 }
 	 }	
 /** Collect Stripe API keys from config (multi-line textarea). */
