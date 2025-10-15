@@ -1,13 +1,13 @@
 <?php namespace ProcessWire;
 
 use ProcessWire\User;
+use ProcessWire\Wire;
 
 /**
  * PLMailService
  * Renders + sends access and reset emails using the HTML layout template.
  */
-class PLMailService
-{
+class PLMailService extends Wire {
 	/* =====================================================================
 	 * ACCESS SUMMARY (1..n Produkte)
 	 * ===================================================================*/
@@ -47,6 +47,9 @@ class PLMailService
 		if ($p && $p->hasField('access_mail_addon_txt')) {
 			$vars['leadText'] = trim((string)$p->access_mail_addon_txt) . "\n\n" . ($vars['leadText'] ?? '');
 		}
+		// for hooks
+		$vars = $this->alterAccessMailVars($vars, $mod, $user, $links);
+
 		$html = $this->renderLayout($mod->mailLayoutPath(), $vars);
 	
 		$m = $mail->new();
@@ -73,7 +76,6 @@ class PLMailService
 
 	/* =====================================================================
 	 * PASSWORD-RESET
-	 *  – gleiche Branding-Variablen & Layout, nur andere Texte/CTA
 	 * ===================================================================*/
 	public function sendPasswordResetMail(StripePaymentLinks $mod, User $user, string $resetUrl): bool
 	{
@@ -125,6 +127,11 @@ class PLMailService
 		}
 	}
 
+	/** Hookable: last-chance override of mail variables */
+	protected function ___alterAccessMailVars(array $vars, StripePaymentLinks $mod, User $user, array $links): array{
+		return $vars;
+	}
+	
 	/* =====================================================================
 	 * Helpers
 	 * ===================================================================*/

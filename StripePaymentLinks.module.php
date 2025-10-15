@@ -1553,7 +1553,9 @@ public function processCheckout(Page $currentPage): void {
 	   
 				   // Persist updated map (even if identical, harmless) and ALWAYS rebuild lines
 				   $item->meta('period_end_map', $map);
-				   try { $item->of(false); } catch (\Throwable $e) {}
+				   try { $item->of(false); } catch (\Throwable $e) {
+					   $this->wire('log')->save(self::LOG_PL, '[updateUserAccessAndNotify] Error: '.$e->getMessage());
+				   }
 				   $this->plRebuildLinesAndSave($item, [
 					   $stripeId => (int)$pid,   
 				   ]);
@@ -1563,7 +1565,8 @@ public function processCheckout(Page $currentPage): void {
 			   if ($userAffected) {
 				   $links = [];
 				   $url   = $product->httpUrl;
-	   
+
+					   
 				   // Optional: attach a short-lived magic-link for convenience
 				   $ttlMinutes = (int)($this->accessTokenTtlMinutes ?? 30);
 				   try {
@@ -1571,7 +1574,7 @@ public function processCheckout(Page $currentPage): void {
 					   $glue  = (strpos($url, '?') === false) ? '?' : '&';
 					   $url  .= $glue . 'access=' . urlencode($token);
 				   } catch (\Throwable $e) {
-					   // best effort; ignore on failure
+					   $this->wire('log')->save(self::LOG_PL, '[updateUserAccessAndNotify] Error: '.$e->getMessage());
 				   }
 	   
 				   $links[] = [
@@ -1583,7 +1586,7 @@ public function processCheckout(Page $currentPage): void {
 				   try {
 					   $this->mail()->sendAccessSummaryMail($this, $u, $links);
 				   } catch (\Throwable $e) {
-					   // mail best effort; ignore on failure
+					   $this->wire('log')->save(self::LOG_PL, '[updateUserAccessAndNotify] Error: '.$e->getMessage());
 				   }
 			   }
 		   }
