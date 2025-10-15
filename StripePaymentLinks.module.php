@@ -34,7 +34,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	public static function getModuleInfo(): array {
 		return [
 			'title'       => 'StripePaymentLinks',
-			'version'     => '1.0.10', 
+			'version'     => '1.0.11', 
 			'summary'     => 'Stripe payment-link redirects, user/purchases, magic link, mails, modals.',
 			'author'      => 'frameless Media',
 			'autoload'    => true,
@@ -1094,7 +1094,7 @@ public function processCheckout(Page $currentPage): void {
 		 $fStripe = $ensure('stripe_product_id',        'FieldtypeText',     'Stripe Product ID');
 		 $fReq    = $ensure('requires_access',          'FieldtypeCheckbox', 'Product: requires access/delivery page');
 		 $fAllow  = $ensure('allow_multiple_purchases', 'FieldtypeCheckbox', 'Product: allows multiple purchases');
-	 	 $fAddon  = $ensure('access_mail_addon_txt',    'FieldtypeText',     'Access Mail Addon Text');
+	 	 $fAddon  = $ensure('access_mail_addon_txt',    'FieldtypeText',     'Access Mail Intro Text (optional)');
 
 		 // Determine templates to attach to
 		 if ($templateNames === null) {
