@@ -34,7 +34,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	public static function getModuleInfo(): array {
 		return [
 			'title'       => 'StripePaymentLinks',
-			'version'     => '1.0.11', 
+			'version'     => '1.0.12', 
 			'summary'     => 'Stripe payment-link redirects, user/purchases, magic link, mails, modals.',
 			'author'      => 'frameless Media',
 			'autoload'    => true,
@@ -591,10 +591,10 @@ public function processCheckout(Page $currentPage): void {
 				   ?? $checkoutSession->customer_email
 				   ?? null;
 	 
-			 $fullName = $checkoutSession->customer_details->name
-					  ?? ($checkoutSession->customer->name ?? null)
-					  ?? ($checkoutSession->shipping->name ?? null)
-					  ?? '';
+	 		 $fullName = ($checkoutSession->customer->name ?? null)
+				   ?? ($checkoutSession->shipping->name ?? null)
+				   ?? ($checkoutSession->customer_details->name ?? '')
+				   ?? '';
 	 
 			 if (!$email) return;
 	 
@@ -825,7 +825,7 @@ public function processCheckout(Page $currentPage): void {
 	 * @param string $key Text key identifier.
 	 * @return string The translated text or empty string if not found.
 	 */
-	public function t(string $key): string {
+	public function ___t(string $key): string {
 		$D = $this->defaultTexts();
 		return $D[$key] ?? '';
 	}
