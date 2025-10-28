@@ -34,7 +34,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	public static function getModuleInfo(): array {
 		return [
 			'title'       => 'StripePaymentLinks',
-			'version'     => '1.0.12', 
+			'version'     => '1.0.13', 
 			'summary'     => 'Stripe payment-link redirects, user/purchases, magic link, mails, modals.',
 			'author'      => 'frameless Media',
 			'autoload'    => true,
@@ -554,216 +554,240 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	 * - Stores per-product period end timestamps in meta 'period_end_map' => [productId => unix_ts].
 	 */
 public function processCheckout(Page $currentPage): void {
-		 $input   = $this->wire('input');
-		 $session = $this->wire('session');
-		 $users   = $this->wire('users');
+	   $input   = $this->wire('input');
+	   $session = $this->wire('session');
+	   $users   = $this->wire('users');
 	 
-		 $sessionId = $input->get->text('session_id');
-		 if (!$sessionId) return;
+	   $sessionId = $input->get->text('session_id');
+	   if (!$sessionId) return;
 	 
-		 // Idempotency (per browser session)
-		 $processed = $session->get('pl_processed_sessions') ?: [];
-		 if (in_array($sessionId, $processed, true)) return;
+	   // Idempotency (per browser session)
+	   $processed = $session->get('pl_processed_sessions') ?: [];
+	   if (in_array($sessionId, $processed, true)) return;
 	 
-		 // Stripe SDK
-		 $sdk = $this->stripeSdkPath ?? (__DIR__ . '/vendor/stripe-php/init.php');
-		 if (!is_file($sdk)) return;
-		 require_once $sdk;
+	   // Stripe SDK
+	   $sdk = $this->stripeSdkPath ?? (__DIR__ . '/vendor/stripe-php/init.php');
+	   if (!is_file($sdk)) return;
+	   require_once $sdk;
 	 
-		 $keys = $this->getStripeKeys();
-		 if (!count($keys)) return;
+	   $keys = $this->getStripeKeys();
+	   if (!count($keys)) return;
 	 
-		 try {
-			 // Retrieve session + keep a client for possible subscription fetch
-			 $bundle = $this->retrieveCheckoutSessionWithKeys($sessionId, $keys);
-			 if (!$bundle) return;
+	   try {
+		 // Retrieve session + keep a client
+		 $bundle = $this->retrieveCheckoutSessionWithKeys($sessionId, $keys);
+		 if (!$bundle) return;
 	 
-			 /** @var \Stripe\Checkout\Session $checkoutSession */
-			 $checkoutSession = $bundle['session'];
-			 /** @var \Stripe\StripeClient $stripe */
-			 $stripe = $bundle['client'];
+		 /** @var \Stripe\Checkout\Session $checkoutSession */
+		 $checkoutSession = $bundle['session'];
+		 /** @var \Stripe\StripeClient $stripe */
+		 $stripe = $bundle['client'];
 	 
-			 if (($checkoutSession->payment_status ?? null) !== 'paid') return;
+		 if (($checkoutSession->payment_status ?? null) !== 'paid') return;
 	 
-			 // Buyer data
-			 $email = $checkoutSession->customer_details->email
-				   ?? ($checkoutSession->customer->email ?? null)
-				   ?? $checkoutSession->customer_email
-				   ?? null;
+		 // Buyer data
+		 $email = $checkoutSession->customer_details->email
+			   ?? ($checkoutSession->customer->email ?? null)
+			   ?? $checkoutSession->customer_email
+			   ?? null;
 	 
-	 		 $fullName = ($checkoutSession->customer->name ?? null)
-				   ?? ($checkoutSession->shipping->name ?? null)
-				   ?? ($checkoutSession->customer_details->name ?? '')
-				   ?? '';
+		 $fullName = ($checkoutSession->customer->name ?? null)
+			   ?? ($checkoutSession->shipping->name ?? null)
+			   ?? ($checkoutSession->customer_details->name ?? '')
+			   ?? '';
 	 
-			 if (!$email) return;
+		 if (!$email) return;
 	 
-			 // Create or update user
-			 $ui    = $this->createUserFromStripe($email, $fullName);
-			 /** @var \ProcessWire\User $buyer */
-			 $buyer = $ui['user'];
-			 $isNew = $ui['isNew'];
+		 // Create or update user
+		 $ui    = $this->createUserFromStripe($email, $fullName);
+		 /** @var \ProcessWire\User $buyer */
+		 $buyer = $ui['user'];
+		 $isNew = $ui['isNew'];
 	 
-			 // ---- determine subscription period end (supports expanded or fetched subscription) ----
-			 $getPeriodEnd = function($sessionObj, \Stripe\StripeClient $client): ?int {
-				 // a) expanded subscription object present?
-				 if (is_object($sessionObj->subscription ?? null)) {
-					 $sub = $sessionObj->subscription;
-					 if (!empty($sub->current_period_end)) return (int) $sub->current_period_end;
-					 if (!empty($sub->items->data) && is_array($sub->items->data)) {
-						 foreach ($sub->items->data as $si) {
-							 if (!empty($si->current_period_end)) return (int)$si->current_period_end;
-						 }
-					 }
+		 // ----- resolve subscription + period_end (if any) -----
+		 $getPeriodEnd = function($sessionObj, \Stripe\StripeClient $client): ?int {
+		   if (is_object($sessionObj->subscription ?? null)) {
+			 $sub = $sessionObj->subscription;
+			 if (!empty($sub->current_period_end)) return (int)$sub->current_period_end;
+			 if (!empty($sub->items->data) && is_array($sub->items->data)) {
+			   foreach ($sub->items->data as $si) {
+				 if (!empty($si->current_period_end)) return (int)$si->current_period_end;
+			   }
+			 }
+		   }
+		   if (is_string($sessionObj->subscription ?? null) && $sessionObj->subscription !== '') {
+			 try {
+			   $sub = $client->subscriptions->retrieve($sessionObj->subscription, []);
+			   if (!empty($sub->current_period_end)) return (int)$sub->current_period_end;
+			   if (!empty($sub->items->data) && is_array($sub->items->data)) {
+				 foreach ($sub->items->data as $si) {
+				   if (!empty($si->current_period_end)) return (int)$si->current_period_end;
 				 }
-				 // b) subscription id available? fetch it
-				 if (is_string($sessionObj->subscription ?? null) && $sessionObj->subscription !== '') {
-					 try {
-						 $sub = $client->subscriptions->retrieve($sessionObj->subscription, []);
-						 if (!empty($sub->current_period_end)) return (int)$sub->current_period_end;
-						 if (!empty($sub->items->data) && is_array($sub->items->data)) {
-							 foreach ($sub->items->data as $si) {
-								 if (!empty($si->current_period_end)) return (int)$si->current_period_end;
-							 }
-						 }
-					 } catch (\Throwable $e) {
-						 // ignore
-					 }
-				 }
-				 return null;
-			 };
-			 $subscriptionPeriodEnd = $getPeriodEnd($checkoutSession, $stripe); // unix ts or null
+			   }
+			 } catch (\Throwable $e) {}
+		   }
+		   return null;
+		 };
+		 $subscriptionPeriodEnd = $getPeriodEnd($checkoutSession, $stripe); // unix ts or null
 	 
-			 // ---- collect productIds, accessProducts, and flags ----
-			 $accessProducts    = [];
-			 $allMapped         = [];
-			 $unmapped          = [];
-			 $alreadyDisallowed = false;
-			 $productIds        = []; // include 0 for unmapped/non-access
+		 // ---- collect line items → mapped/unmapped ----
+		 $accessProducts    = [];
+		 $allMapped         = [];
+		 $unmapped          = [];
+		 $alreadyDisallowed = false;
+		 $productIds        = []; // all mapped ids (0 for unmapped)
 	 
-			 $liArray = (array) ($checkoutSession->line_items->data ?? []);
-			 foreach ($liArray as $li) {
-				 $label = ($li->price->product->name ?? null)
-					   ?? ($li->description ?? null)
-					   ?? ($li->price->nickname ?? null)
-					   ?? 'unknown item';
+		 $liArray = (array) ($checkoutSession->line_items->data ?? []);
+		 foreach ($liArray as $li) {
+		   $label = ($li->price->product->name ?? null)
+				 ?? ($li->description ?? null)
+				 ?? ($li->price->nickname ?? null)
+				 ?? 'unknown item';
 	 
-				 $pwProduct = $this->mapStripeLineItemToProduct($li);
-				 $pid       = $pwProduct ? (int) $pwProduct->id : 0;
-				 $productIds[] = $pid;
+		   $pwProduct = $this->mapStripeLineItemToProduct($li);
+		   $pid       = $pwProduct ? (int) $pwProduct->id : 0;
+		   $productIds[] = $pid;
 	 
-				 if ($pwProduct && $pwProduct->id) {
-					 $allMapped[$pwProduct->id] = $pwProduct;
+		   if ($pwProduct && $pwProduct->id) {
+			 $allMapped[$pwProduct->id] = $pwProduct;
 	 
-					 $allowsMultiple = $this->productAllowsMultiple($pwProduct);
-					 $requiresAccess = $this->productRequiresAccess($pwProduct);
-					 $alreadyActive  = $this->hasActiveAccess($buyer, $pwProduct);
+			 $allowsMultiple = $this->productAllowsMultiple($pwProduct);
+			 $requiresAccess = $this->productRequiresAccess($pwProduct);
+			 $alreadyActive  = $this->hasActiveAccess($buyer, $pwProduct);
 	 
-					 if ($requiresAccess) $accessProducts[$pwProduct->id] = $pwProduct;
-					 if ($alreadyActive && !$allowsMultiple) $alreadyDisallowed = true;
-				 } else {
-					 $unmapped[] = (string) $label;
-				 }
+			 if ($requiresAccess) $accessProducts[$pwProduct->id] = $pwProduct;
+			 if ($alreadyActive && !$allowsMultiple) $alreadyDisallowed = true;
+		   } else {
+			 $unmapped[] = (string)$label;
+		   }
+		 }
+		 $productIds = array_values(array_unique(array_map('intval', $productIds)));
+	 
+		 // ---- subscription state + effective end ----
+		 $sub    = (is_object($checkoutSession->subscription ?? null)) ? $checkoutSession->subscription : null;
+		 if (!$sub && is_string($checkoutSession->subscription ?? null) && $checkoutSession->subscription !== '') {
+		   try { $sub = $stripe->subscriptions->retrieve($checkoutSession->subscription, []); } catch (\Throwable $e) {}
+		 }
+	 
+		 $canceled = $sub ? ((string)($sub->status ?? '') === 'canceled') : null;
+		 $paused   = $sub ? ((isset($sub->pause_collection) && $sub->pause_collection !== null) ? true : false) : null;
+		 if ($canceled === true) $paused = false;
+	 
+		 $effectiveEnd = $subscriptionPeriodEnd ?: null;
+		 if ($sub) {
+		   $currentEnd = is_numeric($sub->current_period_end ?? null) ? (int)$sub->current_period_end : null;
+		   $cancelAt   = is_numeric($sub->cancel_at ?? null)          ? (int)$sub->cancel_at          : null;
+		   $endedAt    = is_numeric($sub->ended_at ?? null)           ? (int)$sub->ended_at           : null;
+		   $cap        = (bool)($sub->cancel_at_period_end ?? false);
+	 
+		   if ($canceled) {
+			 $effectiveEnd = $endedAt ?: ($cancelAt ?: ($currentEnd ?: ($effectiveEnd ?: time())));
+		   } elseif ($cap && $currentEnd) {
+			 $effectiveEnd = max((int)($effectiveEnd ?? 0), (int)$currentEnd);
+		   } elseif ($currentEnd) {
+			 $effectiveEnd = $effectiveEnd ? max($effectiveEnd, $currentEnd) : $currentEnd;
+		   }
+		 }
+	 
+		 // ---- compute subscription product IDs (ONLY recurring) ----
+		 $subscriptionPids = [];
+		 if ($sub && isset($sub->items->data) && is_array($sub->items->data)) {
+		   foreach ($sub->items->data as $si) {
+			 $stripeProd = (string)($si->price->product ?? '');
+			 if ($stripeProd !== '') {
+			   $pid = $this->mapStripeProductToPageId($stripeProd);
+			   if ($pid) $subscriptionPids[] = (int)$pid;
 			 }
-			 $productIds = array_values(array_unique(array_map('intval', $productIds)));
+		   }
+		 }
+		 $subscriptionPids = array_values(array_unique(array_map('intval', $subscriptionPids)));
 	 
-			 // ---- derive subscription flags + effective end (canceled > paused) ----
-			 $sub      = (is_object($checkoutSession->subscription ?? null)) ? $checkoutSession->subscription : null;
-			 $canceled = $sub ? ((string)($sub->status ?? '') === 'canceled') : null; // null = unknown
-			 $paused   = $sub ? ((isset($sub->pause_collection) && $sub->pause_collection !== null) ? true : false) : null;
-			 if ($canceled === true) $paused = false;
+		 // ---- persist repeater item ----
+		 if ($buyer->hasField('spl_purchases')) {
+		   $buyer->of(false);
+		   $item = $buyer->spl_purchases->getNew();
 	 
-			 $effectiveEnd = $subscriptionPeriodEnd ?: null; // start with resolved period end if any
-			 if ($sub) {
-				 $currentEnd = is_numeric($sub->current_period_end ?? null) ? (int)$sub->current_period_end : null;
-				 $cancelAt   = is_numeric($sub->cancel_at ?? null)          ? (int)$sub->cancel_at          : null;
-				 $endedAt    = is_numeric($sub->ended_at ?? null)           ? (int)$sub->ended_at           : null;
-				 $cap        = (bool)($sub->cancel_at_period_end ?? false);
+		   $purchaseTs = (isset($checkoutSession->created) && is_numeric($checkoutSession->created))
+			 ? (int)$checkoutSession->created
+			 : time();
 	 
-				 if ($canceled) {
-					 $effectiveEnd = $endedAt ?: ($cancelAt ?: ($currentEnd ?: ($effectiveEnd ?: time())));
-				 } elseif ($cap && $currentEnd) {
-					 $effectiveEnd = max((int)($effectiveEnd ?? 0), (int)$currentEnd);
-				 } elseif ($currentEnd) {
-					 $effectiveEnd = $effectiveEnd ? max($effectiveEnd, $currentEnd) : $currentEnd;
-				 }
+		   $item->set('purchase_date', $purchaseTs);
+		   $buyer->spl_purchases->add($item);
+		   $this->wire('users')->save($buyer, ['quiet' => true]);
+	 
+		   // 1) Write metas/lines WITHOUT period_end to avoid touching one-time products
+		   $this->plWriteMetasAndRebuild($item, $checkoutSession, $productIds, null, $paused, $canceled);
+	 
+		   // 2) If we do have a subscription end, apply it ONLY to the subscription product IDs
+		   if ($effectiveEnd && $subscriptionPids) {
+			 $map = (array)$item->meta('period_end_map');
+			 $changed = false;
+			 foreach ($subscriptionPids as $pid) {
+			   $old = isset($map[$pid]) && is_numeric($map[$pid]) ? (int)$map[$pid] : 0;
+			   if ($effectiveEnd > $old) { $map[(string)$pid] = (int)$effectiveEnd; $changed = true; }
 			 }
-	 
-			 // ---- persist repeater item via single helper (Trait writes metas + lines) ----
-			 if ($buyer->hasField('spl_purchases')) {
-				 $buyer->of(false);
-				 $item = $buyer->spl_purchases->getNew();
-	 
-				 $purchaseTs = (isset($checkoutSession->created) && is_numeric($checkoutSession->created))
-					 ? (int) $checkoutSession->created
-					 : time();
-	 
-				 $item->set('purchase_date', $purchaseTs);
-				 $buyer->spl_purchases->add($item);
-				 $this->wire('users')->save($buyer, ['quiet' => true]);
-	 
-				 // Write metas + rebuild lines once
-				 $this->plWriteMetasAndRebuild($item, $checkoutSession, $productIds, $effectiveEnd, $paused, $canceled);
-				 $buyer->of(true);
+			 if ($changed) {
+			   $item->meta('period_end_map', $map);
+			   // keep purchase lines in sync
+			   $this->plRebuildLinesAndSave($item);
 			 }
+		   }
+		   $buyer->of(true);
+		 }
 	 
-			 // Enforce login
-			 if (!$this->wire('user')->isLoggedin() || $this->wire('user')->id !== $buyer->id) {
-				 $this->wire('session')->forceLogin($buyer);
+		 // Enforce login
+		 if (!$this->wire('user')->isLoggedin() || $this->wire('user')->id !== $buyer->id) {
+		   $this->wire('session')->forceLogin($buyer);
+		 }
+	 
+		 // Access links (only for gated products)
+		 $links = [];
+		 $token = null;
+		 if (!empty($accessProducts)) {
+		   foreach ($accessProducts as $p) {
+			 $url = $p->httpUrl;
+			 if ($isNew) {
+			   if ($token === null) {
+				 $ttlMinutes = (int)($this->accessTokenTtlMinutes ?: 30);
+				 $token = $this->createAccessToken($buyer, $ttlMinutes * 60);
+			   }
+			   $glue = (strpos($url, '?') === false) ? '?' : '&';
+			   $url .= $glue . 'access=' . urlencode($token);
 			 }
+			 $links[] = ['title' => (string)$p->title, 'url' => $url, 'id' => (int)$p->id];
+		   }
+		   $session->set('pl_access_links', $links);
+		 }
 	 
-			 // Access links (only for gated products; generic thanks page otherwise)
-			 $links = [];
-			 $token = null;
-			 if (!empty($accessProducts)) {
-				 foreach ($accessProducts as $p) {
-					 $url = $p->httpUrl;
-					 if ($isNew) {
-						 if ($token === null) {
-							 $ttlMinutes = (int)($this->accessTokenTtlMinutes ?: 30);
-							 $token = $this->createAccessToken($buyer, $ttlMinutes * 60);
-						 }
-						 $glue = (strpos($url, '?') === false) ? '?' : '&';
-						 $url .= $glue . 'access=' . urlencode($token);
-					 }
-					 $links[] = ['title' => (string)$p->title, 'url' => $url, 'id' => (int)$p->id];
-				 }
-				 $session->set('pl_access_links', $links);
-			 }
+		 if (!empty($links) && $this->shouldSendAccessMail($isNew)) {
+		   $this->mail()->sendAccessSummaryMail($this, $buyer, $links);
+		 }
+		 if ($alreadyDisallowed) $this->modal()->queueAlreadyPurchasedModal();
 	 
-			 // Send access summary mail (policy)
-			 if (!empty($links) && $this->shouldSendAccessMail($isNew)) {
-				 $this->mail()->sendAccessSummaryMail($this, $buyer, $links);
-			 }
+		 // Mark session processed
+		 $processed[] = $sessionId;
+		 $session->set('pl_processed_sessions', $processed);
 	 
-			 // Duplicate purchase notice
-			 if ($alreadyDisallowed) $this->modal()->queueAlreadyPurchasedModal();
+		 $this->wire('log')->save(
+		   self::LOG_PL,
+		   '[INFO] Processed Stripe session ' .
+		   json_encode([
+			 'session'        => $sessionId,
+			 'email'          => $email,
+			 'mapped'         => count($allMapped),
+			 'access'         => count($accessProducts),
+			 'unmapped'       => $unmapped ? implode(', ', $unmapped) : '-',
+			 'newUser'        => $isNew ? 'yes' : 'no',
+			 'subPeriodEnd'   => $subscriptionPeriodEnd ?: '-',
+			 'subProductIds'  => $subscriptionPids ?: [],
+		   ], JSON_UNESCAPED_SLASHES)
+		 );
 	 
-			 // Mark session processed
-			 $processed[] = $sessionId;
-			 $session->set('pl_processed_sessions', $processed);
-			 
-			 $this->wire('log')->save(
-				 self::LOG_PL,
-				 '[INFO] Processed Stripe session ' .
-				 json_encode([
-					 'session'        => $sessionId,
-					 'email'          => $email,
-					 'mapped'         => count($allMapped),
-					 'access'         => count($accessProducts),
-					 'unmapped'       => $unmapped ? implode(', ', $unmapped) : '-',
-					 'newUser'        => $isNew ? 'yes' : 'no',
-					 'subPeriodEnd'   => $subscriptionPeriodEnd ?: '-',
-				 ], JSON_UNESCAPED_SLASHES)
-			 );
-			 
-	 
-		 } catch (\Throwable $e) {
-			$this->wire('log')->save(self::LOG_PL, 'processCheckout error: '.$e->getMessage().' '.$sessionId);
-	   	 	return;
-	 	 }
+	   } catch (\Throwable $e) {
+		 $this->wire('log')->save(self::LOG_PL, 'processCheckout error: '.$e->getMessage().' '.$sessionId);
+		 return;
+	   }
 	 }
-
 	/**
 	  * Handles access tokens in ?access query parameter for soft logins or expired notices.
 	  *
