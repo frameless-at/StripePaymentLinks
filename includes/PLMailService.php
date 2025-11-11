@@ -22,9 +22,9 @@ class PLMailService extends Wire {
 		$vars = [
 			'preheader'     => strtr($mod->t($isMulti ? 'mail.multi.preheader' : 'mail.single.preheader'), $repl),
 			'firstname'     => $this->displayName($user),
-			'productTitle'  => $isMulti ? '' : $repl['{title}'],
-			'productUrl'    => $isMulti ? '' : (string)($links[0]['url'] ?? '#'),
-			'ctaText'       => $mod->t($isMulti ? 'mail.multi.cta' : 'mail.single.cta'),
+			'productTitle'  => $isMulti ? null : $repl['{title}'],
+			'productUrl'    => $isMulti ? null : (string)($links[0]['url'] ?? '#'),
+			'ctaText'       => $isMulti ? null : $mod->t('mail.single.cta'),
 			'leadText'      => strtr($mod->t($isMulti ? 'mail.multi.body' : 'mail.single.body'), $repl),
 			'logoUrl'       => (string)($mod->logoUrl ?? ''),
 			'brandColor'    => (string)($mod->brandColor ?? '#7d0a3d'),
@@ -33,7 +33,7 @@ class PLMailService extends Wire {
 			'headerTagline' => $mod->t('mail.common.header_tagline'),
 			'headline'      => $mod->t($isMulti ? 'mail.multi.title' : 'mail.single.title'),
 			'footerNote'    => $mod->t('mail.common.footer_note'),
-			'infoLabel'     => $mod->t('mail.common.info_label'),
+			'infoLabel'     => $isMulti ? null : $mod->t('mail.common.info_label'),
 			'extraHeading'  => $mod->t('mail.common.extra_heading'),
 			'closingText'   => $mod->t('mail.common.closing_text'),
 			'signatureName' => (string)($mod->mailSignatureName ?? $mod->mailFromName ?? ''),
@@ -52,7 +52,6 @@ class PLMailService extends Wire {
 		}
 
 		$vars = $this->alterAccessMailVars($vars, $mod, $user, $links);
-
 		$html = $this->renderLayout($mod->mailLayoutPath(), $vars);
 
 		$m = $mail->new();
