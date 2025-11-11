@@ -31,10 +31,17 @@ The module is designed for small e-commerce or membership scenarios where a full
   - Delivery pages auto-gate users without purchase  
   - Access links with optional magic token for new users  
 
-- **Mail & branding**  
-  - Branded HTML mail layout (logo, color, signature, tagline)  
-  - Access summary mails (single/multi-product)  
-  - Password reset mails  
+- **Mail & branding**
+  - Branded HTML mail layout (logo, color, signature, tagline)
+  - Access summary mails (single/multi-product)
+  - Password reset mails
+
+- **Magic Links**
+  - Manual access link delivery via module config
+  - Multi-product & multi-user sending
+  - Each user receives ONE email with all owned product links
+  - Configurable token validity (TTL)
+  - Test mode (dry-run) before actual sending
 
 - **Modals (Bootstrap)**  
   - Login  
@@ -156,6 +163,24 @@ After creating the webhook, copy the **Webhook Signing Secret** from Stripe and 
 
 ---
 
+## Magic Links
+
+**Magic Links** allow manual sending of access links for already purchased products to customers.
+
+### Usage
+
+1. Open **Module Config** under **Send Magic Links**:
+   - **Products**: Select one or more products (only products with `requires_access=1`)
+   - **Token validity**: Link validity duration in minutes (1–10080)
+   - **Recipients**: Enter email addresses (one per line)
+   - **Test mode**: First check with test mode enabled (no emails sent)
+   - **Send now**: Activate checkbox and save to send
+2. Each recipient receives **one email** with links to **all** selected products they own.
+3. The report shows which emails were sent and which users don't own any of the selected products.
+> **Tip:** Always check in test mode first before actually sending emails!
+
+---
+
 ## Synchronization / Sync Helper
 
 For advanced scenarios (e.g. when purchases were made outside the normal flow, or to backfill history), the module provides a **Sync Helper**:
@@ -184,9 +209,10 @@ This makes it easy to audit or re-import purchases safely.
 - **Stripe Webhook Signing Secret** (optional, needed only for handloing subscriptions)
 - **Product templates** (to enable `requires_access` / `allow_multiple_purchases` flags)
 - **Access mail policy** (`never`, `newUsersOnly`, `always`)
-- **Magic link TTL in minutes**
+- **Magic link TTL in minutes** (default TTL for access tokens)
 - **Mail branding** (logo, color, from name, signature, etc.)
 - **Sync options** (dry-run, update existing, create missing users, date range, email filter)
+- **Magic Links** (manual access link sending: product selection, TTL, recipients, test mode)
 
 ---
 
