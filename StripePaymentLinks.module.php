@@ -214,6 +214,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			$this->ensureProductFields($data['productTemplateNames'] ?? null);
 			$this->ensureCustomerRoleExists();
 			$this->triggerSyncStripeCustomers($data);
+			$this->triggerMagicLinks($data);
 		});
 		$this->addHookAfter('Pages::saveReady', function(\ProcessWire\HookEvent $event) {
 			$page = $event->arguments(0);
@@ -1485,7 +1486,59 @@ public function processCheckout(Page $currentPage): void {
 		$data['pl_sync_run'] = false;
 		$this->modules->saveConfig('StripePaymentLinks', $data);
 	  }
-	  
+
+	  /**
+	   * Trigger magic links sending from config and reset the flag.
+	   *
+	   * @param array $data Saved config values from Modules::saveConfig hook.
+	   * @return void
+	   */
+	  protected function triggerMagicLinks(array $data): void {
+		if (empty($data['pl_magic_send'])) return;
+
+		$productId = (int)($data['pl_magic_product'] ?? 0);
+		$emailsRaw = (string)($data['pl_magic_emails'] ?? '');
+		$ttl = (int)($data['pl_magic_ttl'] ?? 60);
+		$dryRun = (bool)($data['pl_magic_dry_run'] ?? true);
+
+		if (!$productId || !$emailsRaw) {
+			$this->error('Magic Links: Please select a product and enter at least one email address.');
+			$data['pl_magic_send'] = false;
+			$this->modules->saveConfig('StripePaymentLinks', $data);
+			return;
+		}
+
+		// Parse emails
+		$emails = array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', $emailsRaw)));
+
+		try {
+			$result = $this->sendMagicLinksForProduct($productId, $emails, $ttl, !$dryRun);
+
+			// Store report in session for display
+			$report = implode("\n", $result['log']);
+			$this->wire('session')->set('pl_magic_report', $report);
+
+			if ($result['errors']) {
+				$this->error('Magic Links: ' . count($result['errors']) . ' error(s) occurred.');
+			} else {
+				$this->message('Magic Links: ' . ($dryRun ? 'Dry run completed' : 'Sent successfully') . ' – see report below.');
+			}
+
+			$this->wire('log')->save(
+				self::LOG_PL,
+				'[MAGIC LINKS] ' . ($dryRun ? 'DRY RUN' : 'SENT') . ' • Product #' . $productId .
+				' • ' . $result['sent'] . ' sent, ' . $result['skipped'] . ' skipped'
+			);
+		} catch (\Throwable $e) {
+			$this->error('Magic Links error: ' . $e->getMessage());
+			$this->wire('log')->save(self::LOG_PL, '[MAGIC LINKS ERROR] ' . $e->getMessage());
+		}
+
+		// Reset flag so it doesn't trigger again
+		$data['pl_magic_send'] = false;
+		$this->modules->saveConfig('StripePaymentLinks', $data);
+	  }
+
 	  /**
 	   * When a product gets switched to "requires_access", migrate past purchases
 	   * that referenced the Stripe product id as unmapped ("0#<stripeId>") to the
@@ -1615,4 +1668,110 @@ public function processCheckout(Page $currentPage): void {
 			   }
 		   }
 	   }
+
+ /**
+  * Send magic links for a specific product to multiple recipients.
+  *
+  * @param int $productId Product page ID (must have requires_access=1)
+  * @param array $emails List of email addresses
+  * @param int $ttlMinutes Token validity in minutes
+  * @param bool $actuallySend If false, only dry-run output
+  * @return array Results with 'sent', 'skipped', 'errors', 'log'
+  */
+ public function sendMagicLinksForProduct(int $productId, array $emails, int $ttlMinutes = 60, bool $actuallySend = false): array {
+	 $pages = $this->wire('pages');
+	 $users = $this->wire('users');
+	 $sanitizer = $this->wire('sanitizer');
+	 $log = $this->wire('log');
+
+	 $results = [
+		 'sent' => 0,
+		 'skipped' => 0,
+		 'errors' => [],
+		 'log' => []
+	 ];
+
+	 // Validate product
+	 $product = $pages->get((int)$productId);
+	 if (!$product || !$product->id) {
+		 $results['errors'][] = "Product page #{$productId} not found.";
+		 return $results;
+	 }
+
+	 if (!$this->productRequiresAccess($product)) {
+		 $results['log'][] = "WARN • Product #{$product->id} has requires_access=0 (not a delivery page)";
+	 }
+
+	 // Clean email list
+	 $emails = array_values(array_filter(array_unique(array_map(
+		 fn($s) => strtolower(trim($s)), $emails
+	 ))));
+
+	 if (empty($emails)) {
+		 $results['errors'][] = "No valid email addresses provided.";
+		 return $results;
+	 }
+
+	 $results['log'][] = "Product: #{$product->id} {$product->title}";
+	 $results['log'][] = "Recipients: " . implode(', ', $emails);
+	 $results['log'][] = "TTL: {$ttlMinutes} min";
+	 $results['log'][] = "Mode: " . ($actuallySend ? "SEND" : "DRY RUN (no mails)");
+	 $results['log'][] = "";
+
+	 foreach ($emails as $addr) {
+		 $u = $users->get("email=" . $sanitizer->email($addr));
+
+		 if (!$u || !$u->id) {
+			 $results['log'][] = "SKIP  • {$addr} • User not found";
+			 $results['skipped']++;
+			 continue;
+		 }
+
+		 // Check if user has purchased the product
+		 if (!$this->hasPurchasedProduct($u, $product)) {
+			 $results['log'][] = "SKIP  • {$addr} • does not own product #{$product->id}";
+			 $results['skipped']++;
+			 continue;
+		 }
+
+		 // Generate ONE token per user
+		 $token = bin2hex(random_bytes(32));
+		 $u->of(false);
+		 if ($u->hasField('access_token'))   $u->access_token   = $token;
+		 if ($u->hasField('access_expires')) $u->access_expires = time() + max(60, $ttlMinutes * 60);
+		 $users->save($u, ['quiet' => true]);
+
+		 // Build magic link for the ONE product
+		 $link = $product->httpUrl . (strpos($product->httpUrl, '?') === false ? '?' : '&') . 'access=' . urlencode($token);
+		 $linksPayload = [['title' => (string)$product->title, 'url' => $link, 'id' => (int)$product->id]];
+
+		 if ($actuallySend) {
+			 try {
+				 $this->mail()->sendAccessSummaryMail($this, $u, $linksPayload);
+				 $results['log'][] = "SENT  • {$addr} • {$product->title}";
+				 $results['sent']++;
+			 } catch (\Throwable $e) {
+				 $results['log'][] = "ERROR • {$addr} • {$e->getMessage()}";
+				 $results['errors'][] = "{$addr}: {$e->getMessage()}";
+				 $results['skipped']++;
+			 }
+		 } else {
+			 $results['log'][] = "DRY   • {$addr}";
+			 $results['log'][] = "   → {$product->title} • {$link}";
+		 }
+	 }
+
+	 $results['log'][] = "";
+	 $results['log'][] = "Done. Sent: {$results['sent']}, Skipped: {$results['skipped']}";
+
+	 // Log to file
+	 $log->save(
+		 self::LOG_PL,
+		 '[MAGIC LINKS] Product #' . $productId . ' • ' .
+		 ($actuallySend ? 'SENT' : 'DRY RUN') . ' • ' .
+		 $results['sent'] . ' sent, ' . $results['skipped'] . ' skipped'
+	 );
+
+	 return $results;
  }
+}
