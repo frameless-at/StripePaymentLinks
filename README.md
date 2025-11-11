@@ -31,10 +31,17 @@ The module is designed for small e-commerce or membership scenarios where a full
   - Delivery pages auto-gate users without purchase  
   - Access links with optional magic token for new users  
 
-- **Mail & branding**  
-  - Branded HTML mail layout (logo, color, signature, tagline)  
-  - Access summary mails (single/multi-product)  
-  - Password reset mails  
+- **Mail & branding**
+  - Branded HTML mail layout (logo, color, signature, tagline)
+  - Access summary mails (single/multi-product)
+  - Password reset mails
+
+- **Magic Links**
+  - Manual access link delivery via module config
+  - Multi-product & multi-user sending
+  - Each user receives ONE email with all owned product links
+  - Configurable token validity (TTL)
+  - Test mode (dry-run) before actual sending
 
 - **Modals (Bootstrap)**  
   - Login  
@@ -156,6 +163,27 @@ After creating the webhook, copy the **Webhook Signing Secret** from Stripe and 
 
 ---
 
+## Magic Links
+
+**Magic Links** ermöglichen das manuelle Versenden von Access-Links für bereits gekaufte Produkte an Kunden.
+
+### Verwendung
+
+1. In der **Module Config** unter **Send Magic Links** öffnen:
+   - **Products**: Ein oder mehrere Produkte auswählen (nur Produkte mit `requires_access=1`)
+   - **Token validity**: Gültigkeitsdauer des Links in Minuten (1–10080)
+   - **Recipients**: E-Mail-Adressen eingeben (eine pro Zeile)
+   - **Test mode**: Erst mit aktiviertem Test-Modus prüfen (keine Emails versendet)
+   - **Send now**: Checkbox aktivieren und speichern zum Versenden
+
+2. Jeder Empfänger erhält **eine Email** mit Links zu **allen** ausgewählten Produkten, die er besitzt.
+
+3. Der Report zeigt, welche Emails versendet wurden und welche User keine der ausgewählten Produkte besitzen.
+
+> **Tipp:** Immer erst im Test-Modus prüfen, bevor tatsächlich E-Mails versendet werden!
+
+---
+
 ## Synchronization / Sync Helper
 
 For advanced scenarios (e.g. when purchases were made outside the normal flow, or to backfill history), the module provides a **Sync Helper**:
@@ -184,9 +212,10 @@ This makes it easy to audit or re-import purchases safely.
 - **Stripe Webhook Signing Secret** (optional, needed only for handloing subscriptions)
 - **Product templates** (to enable `requires_access` / `allow_multiple_purchases` flags)
 - **Access mail policy** (`never`, `newUsersOnly`, `always`)
-- **Magic link TTL in minutes**
+- **Magic link TTL in minutes** (default TTL for access tokens)
 - **Mail branding** (logo, color, from name, signature, etc.)
 - **Sync options** (dry-run, update existing, create missing users, date range, email filter)
+- **Magic Links** (manual access link sending: product selection, TTL, recipients, test mode)
 
 ---
 
