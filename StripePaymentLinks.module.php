@@ -34,7 +34,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	public static function getModuleInfo(): array {
 		return [
 			'title'       => 'StripePaymentLinks',
-			'version'     => '1.0.13', 
+			'version'     => '1.0.14', 
 			'summary'     => 'Stripe payment-link redirects, user/purchases, magic link, mails, modals.',
 			'author'      => 'frameless Media',
 			'autoload'    => true,
