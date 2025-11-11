@@ -1496,45 +1496,34 @@ public function processCheckout(Page $currentPage): void {
 	  protected function triggerMagicLinks(array $data): void {
 		if (empty($data['pl_magic_send'])) return;
 
-		$productId = (int)($data['pl_magic_product'] ?? 0);
+		$productIds = (array)($data['pl_magic_product'] ?? []);
 		$emailsRaw = (string)($data['pl_magic_emails'] ?? '');
 		$ttl = (int)($data['pl_magic_ttl'] ?? 60);
 		$dryRun = (bool)($data['pl_magic_dry_run'] ?? true);
 
-		if (!$productId || !$emailsRaw) {
-			$this->error('Magic Links: Please select a product and enter at least one email address.');
+		if (empty($productIds) || !$emailsRaw) {
+			$this->error('Magic Links: Please select at least one product and enter at least one email address.');
 			$data['pl_magic_send'] = false;
 			$this->modules->saveConfig('StripePaymentLinks', $data);
 			return;
 		}
 
-		// Parse emails
 		$emails = array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', $emailsRaw)));
 
 		try {
-			$result = $this->sendMagicLinksForProduct($productId, $emails, $ttl, !$dryRun);
-
-			// Store report in session for display
-			$report = implode("\n", $result['log']);
-			$this->wire('session')->set('pl_magic_report', $report);
+			$result = $this->sendMagicLinksForProduct($productIds, $emails, $ttl, !$dryRun);
+			$this->wire('session')->set('pl_magic_report', implode("\n", $result['log']));
 
 			if ($result['errors']) {
 				$this->error('Magic Links: ' . count($result['errors']) . ' error(s) occurred.');
 			} else {
 				$this->message('Magic Links: ' . ($dryRun ? 'Dry run completed' : 'Sent successfully') . ' – see report below.');
 			}
-
-			$this->wire('log')->save(
-				self::LOG_PL,
-				'[MAGIC LINKS] ' . ($dryRun ? 'DRY RUN' : 'SENT') . ' • Product #' . $productId .
-				' • ' . $result['sent'] . ' sent, ' . $result['skipped'] . ' skipped'
-			);
 		} catch (\Throwable $e) {
 			$this->error('Magic Links error: ' . $e->getMessage());
 			$this->wire('log')->save(self::LOG_PL, '[MAGIC LINKS ERROR] ' . $e->getMessage());
 		}
 
-		// Reset flag so it doesn't trigger again
 		$data['pl_magic_send'] = false;
 		$this->modules->saveConfig('StripePaymentLinks', $data);
 	  }
@@ -1670,40 +1659,50 @@ public function processCheckout(Page $currentPage): void {
 	   }
 
  /**
-  * Send magic links for a specific product to multiple recipients.
+  * Send magic links for one or multiple products to multiple recipients.
+  * Each user receives ONE email with links to all products they own.
   *
-  * @param int $productId Product page ID (must have requires_access=1)
+  * @param array $productIds Product page IDs (must have requires_access=1)
   * @param array $emails List of email addresses
   * @param int $ttlMinutes Token validity in minutes
   * @param bool $actuallySend If false, only dry-run output
   * @return array Results with 'sent', 'skipped', 'errors', 'log'
   */
- public function sendMagicLinksForProduct(int $productId, array $emails, int $ttlMinutes = 60, bool $actuallySend = false): array {
+ public function sendMagicLinksForProduct(array $productIds, array $emails, int $ttlMinutes = 60, bool $actuallySend = false): array {
 	 $pages = $this->wire('pages');
 	 $users = $this->wire('users');
 	 $sanitizer = $this->wire('sanitizer');
-	 $log = $this->wire('log');
 
-	 $results = [
-		 'sent' => 0,
-		 'skipped' => 0,
-		 'errors' => [],
-		 'log' => []
-	 ];
+	 $results = ['sent' => 0, 'skipped' => 0, 'errors' => [], 'log' => []];
 
-	 // Validate product
-	 $product = $pages->get((int)$productId);
-	 if (!$product || !$product->id) {
-		 $results['errors'][] = "Product page #{$productId} not found.";
+	 // Normalize & validate product IDs
+	 $productIds = array_values(array_unique(array_filter(array_map('intval', $productIds))));
+	 if (empty($productIds)) {
+		 $results['errors'][] = "No valid product IDs provided.";
 		 return $results;
 	 }
 
-	 if (!$this->productRequiresAccess($product)) {
-		 $results['log'][] = "WARN • Product #{$product->id} has requires_access=0 (not a delivery page)";
+	 // Load & validate products
+	 $products = [];
+	 foreach ($productIds as $pid) {
+		 $p = $pages->get((int)$pid);
+		 if (!$p || !$p->id) {
+			 $results['log'][] = "WARN • Product #{$pid} not found, skipping";
+			 continue;
+		 }
+		 if (!$this->productRequiresAccess($p)) {
+			 $results['log'][] = "WARN • Product #{$p->id} has requires_access=0";
+		 }
+		 $products[$p->id] = $p;
 	 }
 
-	 // Clean email list
-	 $emails = array_values(array_filter(array_unique(array_map(
+	 if (empty($products)) {
+		 $results['errors'][] = "No valid products found.";
+		 return $results;
+	 }
+
+	 // Normalize emails
+	 $emails = array_values(array_unique(array_filter(array_map(
 		 fn($s) => strtolower(trim($s)), $emails
 	 ))));
 
@@ -1712,12 +1711,14 @@ public function processCheckout(Page $currentPage): void {
 		 return $results;
 	 }
 
-	 $results['log'][] = "Product: #{$product->id} {$product->title}";
+	 // Log header
+	 $results['log'][] = "Products: " . implode(', ', array_map(fn($p) => "#{$p->id} {$p->title}", $products));
 	 $results['log'][] = "Recipients: " . implode(', ', $emails);
 	 $results['log'][] = "TTL: {$ttlMinutes} min";
 	 $results['log'][] = "Mode: " . ($actuallySend ? "SEND" : "DRY RUN (no mails)");
 	 $results['log'][] = "";
 
+	 // Process each user
 	 foreach ($emails as $addr) {
 		 $u = $users->get("email=" . $sanitizer->email($addr));
 
@@ -1727,28 +1728,34 @@ public function processCheckout(Page $currentPage): void {
 			 continue;
 		 }
 
-		 // Check if user has purchased the product
-		 if (!$this->hasPurchasedProduct($u, $product)) {
-			 $results['log'][] = "SKIP  • {$addr} • does not own product #{$product->id}";
+		 // Filter products user actually owns
+		 $ownedProducts = array_filter($products, fn($p) => $this->hasPurchasedProduct($u, $p));
+
+		 if (empty($ownedProducts)) {
+			 $results['log'][] = "SKIP  • {$addr} • Owns none of the selected products";
 			 $results['skipped']++;
 			 continue;
 		 }
 
-		 // Generate ONE token per user
+		 // Generate ONE token for this user
 		 $token = bin2hex(random_bytes(32));
 		 $u->of(false);
 		 if ($u->hasField('access_token'))   $u->access_token   = $token;
 		 if ($u->hasField('access_expires')) $u->access_expires = time() + max(60, $ttlMinutes * 60);
 		 $users->save($u, ['quiet' => true]);
 
-		 // Build magic link for the ONE product
-		 $link = $product->httpUrl . (strpos($product->httpUrl, '?') === false ? '?' : '&') . 'access=' . urlencode($token);
-		 $linksPayload = [['title' => (string)$product->title, 'url' => $link, 'id' => (int)$product->id]];
+		 // Build links for all owned products
+		 $linksPayload = array_map(fn($p) => [
+			 'title' => (string)$p->title,
+			 'url'   => $p->httpUrl . (strpos($p->httpUrl, '?') === false ? '?' : '&') . 'access=' . urlencode($token),
+			 'id'    => (int)$p->id
+		 ], $ownedProducts);
 
 		 if ($actuallySend) {
 			 try {
 				 $this->mail()->sendAccessSummaryMail($this, $u, $linksPayload);
-				 $results['log'][] = "SENT  • {$addr} • {$product->title}";
+				 $productTitles = implode(', ', array_map(fn($p) => $p->title, $ownedProducts));
+				 $results['log'][] = "SENT  • {$addr} • {$productTitles}";
 				 $results['sent']++;
 			 } catch (\Throwable $e) {
 				 $results['log'][] = "ERROR • {$addr} • {$e->getMessage()}";
@@ -1757,7 +1764,9 @@ public function processCheckout(Page $currentPage): void {
 			 }
 		 } else {
 			 $results['log'][] = "DRY   • {$addr}";
-			 $results['log'][] = "   → {$product->title} • {$link}";
+			 foreach ($linksPayload as $link) {
+				 $results['log'][] = "   → {$link['title']} • {$link['url']}";
+			 }
 		 }
 	 }
 
@@ -1765,9 +1774,9 @@ public function processCheckout(Page $currentPage): void {
 	 $results['log'][] = "Done. Sent: {$results['sent']}, Skipped: {$results['skipped']}";
 
 	 // Log to file
-	 $log->save(
+	 $this->wire('log')->save(
 		 self::LOG_PL,
-		 '[MAGIC LINKS] Product #' . $productId . ' • ' .
+		 '[MAGIC LINKS] Products: [' . implode(', ', array_keys($products)) . '] • ' .
 		 ($actuallySend ? 'SENT' : 'DRY RUN') . ' • ' .
 		 $results['sent'] . ' sent, ' . $results['skipped'] . ' skipped'
 	 );
