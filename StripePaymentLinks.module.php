@@ -1744,12 +1744,12 @@ public function processCheckout(Page $currentPage): void {
 		 if ($u->hasField('access_expires')) $u->access_expires = time() + max(60, $ttlMinutes * 60);
 		 $users->save($u, ['quiet' => true]);
 
-		 // Build links for all owned products
-		 $linksPayload = array_map(fn($p) => [
+		 // Build links for all owned products - re-index with array_values to ensure [0], [1], etc.
+		 $linksPayload = array_values(array_map(fn($p) => [
 			 'title' => (string)$p->title,
 			 'url'   => $p->httpUrl . (strpos($p->httpUrl, '?') === false ? '?' : '&') . 'access=' . urlencode($token),
 			 'id'    => (int)$p->id
-		 ], $ownedProducts);
+		 ], $ownedProducts));
 
 		 if ($actuallySend) {
 			 try {
