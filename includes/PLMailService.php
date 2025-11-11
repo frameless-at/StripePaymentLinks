@@ -18,13 +18,13 @@ class PLMailService extends Wire {
 		$isMulti  = count($links) > 1;
 		$listText = implode(', ', array_filter(array_map(fn($l) => (string)($l['title'] ?? ''), $links)));
 		$repl     = ['{title}' => (string)($links[0]['title'] ?? $mod->t('mail.common.product_fallback')), '{list}' => $listText];
-
+	
 		$vars = [
 			'preheader'     => strtr($mod->t($isMulti ? 'mail.multi.preheader' : 'mail.single.preheader'), $repl),
 			'firstname'     => $this->displayName($user),
-			'productTitle'  => $isMulti ? null : $repl['{title}'],
-			'productUrl'    => $isMulti ? null : (string)($links[0]['url'] ?? '#'),
-			'ctaText'       => $isMulti ? null : $mod->t('mail.single.cta'),
+			'productTitle'  => $repl['{title}'],
+			'productUrl'    => (string)($links[0]['url'] ?? '#'),
+			'ctaText'       => $mod->t($isMulti ? 'mail.multi.cta' : 'mail.single.cta'),
 			'leadText'      => strtr($mod->t($isMulti ? 'mail.multi.body' : 'mail.single.body'), $repl),
 			'logoUrl'       => (string)($mod->logoUrl ?? ''),
 			'brandColor'    => (string)($mod->brandColor ?? '#7d0a3d'),
@@ -33,27 +33,25 @@ class PLMailService extends Wire {
 			'headerTagline' => $mod->t('mail.common.header_tagline'),
 			'headline'      => $mod->t($isMulti ? 'mail.multi.title' : 'mail.single.title'),
 			'footerNote'    => $mod->t('mail.common.footer_note'),
-			'infoLabel'     => $isMulti ? null : $mod->t('mail.common.info_label'),
+			'infoLabel'     => $mod->t('mail.common.info_label'),
 			'extraHeading'  => $mod->t('mail.common.extra_heading'),
 			'closingText'   => $mod->t('mail.common.closing_text'),
 			'signatureName' => (string)($mod->mailSignatureName ?? $mod->mailFromName ?? ''),
 			'directLabel'   => $mod->t('mail.common.direct_link'),
 			'extraCtas'     => $isMulti ? array_map(
 				fn($l) => ['title' => (string)($l['title'] ?? ''), 'url' => (string)($l['url'] ?? '#')],
-				$links
+				array_slice($links, 1)
 			) : [],
 		];
-
-		if (!$isMulti) {
-			$p = $mod->wire('pages')->get((int)$links[0]['id']);
-			if ($p && $p->hasField('access_mail_addon_txt')) {
-				$vars['leadText'] = trim((string)$p->access_mail_addon_txt) . "\n\n" . ($vars['leadText'] ?? '');
-			}
+		$p = $mod->wire('pages')->get((int)$links[0]['id']);
+		if ($p && $p->hasField('access_mail_addon_txt')) {
+			$vars['leadText'] = trim((string)$p->access_mail_addon_txt) . "\n\n" . ($vars['leadText'] ?? '');
 		}
-
+		// for hooks
 		$vars = $this->alterAccessMailVars($vars, $mod, $user, $links);
-		$html = $this->renderLayout($mod->mailLayoutPath(), $vars);
 
+		$html = $this->renderLayout($mod->mailLayoutPath(), $vars);
+	
 		$m = $mail->new();
 		$m->to($user->email);
 		$m->from(
@@ -62,19 +60,8 @@ class PLMailService extends Wire {
 		);
 		$m->subject(($mod->subjectPrefix ?? '') . strtr($mod->t($isMulti ? 'mail.multi.subject' : 'mail.single.subject'), $repl));
 		$m->bodyHTML($html);
-
-		$plainBody = $vars['leadText'] . "\n\n";
-		if ($isMulti) {
-			foreach ($links as $link) {
-				$plainBody .= "• " . ($link['title'] ?? '') . ": " . ($link['url'] ?? '') . "\n";
-			}
-		} else {
-			$plainBody .= ($vars['productUrl'] ?? '') . "\n";
-		}
-		$plainBody .= "\n" . $vars['closingText'] . "\n" . $vars['signatureName'];
-
-		$m->body($plainBody);
-
+		$m->body(strtr("{$vars['leadText']}\n\n{$vars['productUrl']}\n\n{$vars['closingText']}\n{$vars['signatureName']}\n", $repl));
+	
 		try {
 			$sent = (bool)$m->send();
 			if ($sent) {
