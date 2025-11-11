@@ -18,12 +18,12 @@ class PLMailService extends Wire {
 		$isMulti  = count($links) > 1;
 		$listText = implode(', ', array_filter(array_map(fn($l) => (string)($l['title'] ?? ''), $links)));
 		$repl     = ['{title}' => (string)($links[0]['title'] ?? $mod->t('mail.common.product_fallback')), '{list}' => $listText];
-	
+
 		$vars = [
 			'preheader'     => strtr($mod->t($isMulti ? 'mail.multi.preheader' : 'mail.single.preheader'), $repl),
 			'firstname'     => $this->displayName($user),
-			'productTitle'  => $repl['{title}'],
-			'productUrl'    => (string)($links[0]['url'] ?? '#'),
+			'productTitle'  => $isMulti ? '' : $repl['{title}'],
+			'productUrl'    => $isMulti ? '' : (string)($links[0]['url'] ?? '#'),
 			'ctaText'       => $mod->t($isMulti ? 'mail.multi.cta' : 'mail.single.cta'),
 			'leadText'      => strtr($mod->t($isMulti ? 'mail.multi.body' : 'mail.single.body'), $repl),
 			'logoUrl'       => (string)($mod->logoUrl ?? ''),
@@ -40,18 +40,21 @@ class PLMailService extends Wire {
 			'directLabel'   => $mod->t('mail.common.direct_link'),
 			'extraCtas'     => $isMulti ? array_map(
 				fn($l) => ['title' => (string)($l['title'] ?? ''), 'url' => (string)($l['url'] ?? '#')],
-				array_slice($links, 1)
+				$links
 			) : [],
 		];
-		$p = $mod->wire('pages')->get((int)$links[0]['id']);
-		if ($p && $p->hasField('access_mail_addon_txt')) {
-			$vars['leadText'] = trim((string)$p->access_mail_addon_txt) . "\n\n" . ($vars['leadText'] ?? '');
+
+		if (!$isMulti) {
+			$p = $mod->wire('pages')->get((int)$links[0]['id']);
+			if ($p && $p->hasField('access_mail_addon_txt')) {
+				$vars['leadText'] = trim((string)$p->access_mail_addon_txt) . "\n\n" . ($vars['leadText'] ?? '');
+			}
 		}
-		// for hooks
+
 		$vars = $this->alterAccessMailVars($vars, $mod, $user, $links);
 
 		$html = $this->renderLayout($mod->mailLayoutPath(), $vars);
-	
+
 		$m = $mail->new();
 		$m->to($user->email);
 		$m->from(
@@ -60,8 +63,19 @@ class PLMailService extends Wire {
 		);
 		$m->subject(($mod->subjectPrefix ?? '') . strtr($mod->t($isMulti ? 'mail.multi.subject' : 'mail.single.subject'), $repl));
 		$m->bodyHTML($html);
-		$m->body(strtr("{$vars['leadText']}\n\n{$vars['productUrl']}\n\n{$vars['closingText']}\n{$vars['signatureName']}\n", $repl));
-	
+
+		$plainBody = $vars['leadText'] . "\n\n";
+		if ($isMulti) {
+			foreach ($links as $link) {
+				$plainBody .= "• " . ($link['title'] ?? '') . ": " . ($link['url'] ?? '') . "\n";
+			}
+		} else {
+			$plainBody .= ($vars['productUrl'] ?? '') . "\n";
+		}
+		$plainBody .= "\n" . $vars['closingText'] . "\n" . $vars['signatureName'];
+
+		$m->body($plainBody);
+
 		try {
 			$sent = (bool)$m->send();
 			if ($sent) {
