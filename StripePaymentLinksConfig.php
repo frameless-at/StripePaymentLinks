@@ -46,6 +46,13 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			'pl_sync_from' => '',
 			'pl_sync_to' => '',
 			'pl_sync_run' => false,
+
+			// Magic Links
+			'pl_magic_product' => 0,
+			'pl_magic_emails' => '',
+			'pl_magic_ttl' => 60,
+			'pl_magic_dry_run' => true,
+			'pl_magic_send' => false,
 		];
 	}
 
@@ -354,6 +361,84 @@ class StripePaymentLinksConfig extends ModuleConfig {
 				$this->wire('session')->remove('pl_sync_report');
 			}
 			$inputfields->add($fsSync);
+
+		/** -----------------------
+		 *  Magic Links (send access links manually)
+		 *  ----------------------*/
+		$fsMagic = $this->modules->get('InputfieldFieldset');
+		$fsMagic->label = 'Send Magic Links';
+		$fsMagic->name  = 'pl_magic_links';
+		$fsMagic->collapsed = Inputfield::collapsedYes;
+		$fsMagic->description = 'Send magic links (access tokens) for a specific product to one or multiple customers who already own it.';
+
+			// Product selection
+			/** @var \ProcessWire\InputfieldPage $prod */
+			$prod = $this->modules->get('InputfieldPage');
+			$prod->name = 'pl_magic_product';
+			$prod->label = 'Product (requires_access=1)';
+			$prod->description = 'Select the product for which to send magic links.';
+			$prod->findPagesSelector = 'template!=admin, requires_access=1';
+			$prod->inputfield = 'InputfieldSelect';
+			$prod->labelFieldName = 'title';
+			$prod->columnWidth = 50;
+			$fsMagic->add($prod);
+
+			// TTL
+			/** @var \ProcessWire\InputfieldInteger $ttl */
+			$ttl = $this->modules->get('InputfieldInteger');
+			$ttl->name = 'pl_magic_ttl';
+			$ttl->label = 'Token validity (minutes)';
+			$ttl->description = 'How long the magic link should be valid.';
+			$ttl->min = 1;
+			$ttl->max = 10080;
+			$ttl->columnWidth = 50;
+			$fsMagic->add($ttl);
+
+			// Email list
+			/** @var \ProcessWire\InputfieldTextarea $emails */
+			$emails = $this->modules->get('InputfieldTextarea');
+			$emails->name = 'pl_magic_emails';
+			$emails->label = 'Recipients (one email per line)';
+			$emails->description = 'Enter email addresses of users who should receive the magic link.';
+			$emails->notes = 'Only users who have purchased this product will receive links.';
+			$emails->rows = 6;
+			$fsMagic->add($emails);
+
+			// Dry run checkbox
+			/** @var \ProcessWire\InputfieldCheckbox $dry */
+			$dry = $this->modules->get('InputfieldCheckbox');
+			$dry->name = 'pl_magic_dry_run';
+			$dry->label = 'Test mode (no emails sent)';
+			$dry->description = 'If checked, only show what would be sent without actually sending emails.';
+			$dry->checked = (bool)$this->get('pl_magic_dry_run');
+			$dry->columnWidth = 50;
+			$fsMagic->add($dry);
+
+			// Send trigger
+			/** @var \ProcessWire\InputfieldCheckbox $send */
+			$send = $this->modules->get('InputfieldCheckbox');
+			$send->name = 'pl_magic_send';
+			$send->label = 'Send now';
+			$send->description = 'Check this box and save to trigger the sending process.';
+			$send->notes = 'Always start with test mode enabled first!';
+			$send->columnWidth = 50;
+			$fsMagic->add($send);
+
+			// Report display
+			$report = $this->wire('session')->get('pl_magic_report');
+			if ($report) {
+				/** @var \ProcessWire\InputfieldMarkup $out */
+				$out = $this->modules->get('InputfieldMarkup');
+				$out->name = 'pl_magic_report';
+				$out->label = 'Magic Links Report';
+				$out->value = '<pre style="white-space:pre-wrap;max-height:400px;overflow:auto;margin:0;background:#f5f5f5;padding:1em;border:1px solid #ddd;border-radius:4px;">'
+							. htmlspecialchars((string)$report, ENT_QUOTES, 'UTF-8')
+							. '</pre>';
+				$fsMagic->add($out);
+				$this->wire('session')->remove('pl_magic_report');
+			}
+
+		$inputfields->add($fsMagic);
 
 		return $inputfields;
 	}
