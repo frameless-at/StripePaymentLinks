@@ -48,7 +48,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			'pl_sync_run' => false,
 
 			// Magic Links
-			'pl_magic_product' => 0,
+			'pl_magic_product' => [],
 			'pl_magic_emails' => '',
 			'pl_magic_ttl' => 60,
 			'pl_magic_dry_run' => true,
@@ -369,18 +369,19 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		$fsMagic->label = 'Send Magic Links';
 		$fsMagic->name  = 'pl_magic_links';
 		$fsMagic->collapsed = Inputfield::collapsedYes;
-		$fsMagic->description = 'Send magic links (access tokens) for a specific product to one or multiple customers who already own it.';
+		$fsMagic->description = 'Send magic links (access tokens) for one or multiple products to customers who own them. Each user receives ONE email with links to all their owned products.';
 
-			// Product selection
-			/** @var \ProcessWire\InputfieldPage $prod */
-			$prod = $this->modules->get('InputfieldPage');
+			// Product selection (multi)
+			/** @var \ProcessWire\InputfieldAsmSelect $prod */
+			$prod = $this->modules->get('InputfieldAsmSelect');
 			$prod->name = 'pl_magic_product';
-			$prod->label = 'Product (requires_access=1)';
-			$prod->description = 'Select the product for which to send magic links.';
-			$prod->findPagesSelector = 'template!=admin, requires_access=1';
-			$prod->inputfield = 'InputfieldSelect';
-			$prod->labelFieldName = 'title';
+			$prod->label = 'Products (requires_access=1)';
+			$prod->description = 'Select one or multiple products.';
 			$prod->columnWidth = 50;
+			$products = $this->pages->find('template!=admin, requires_access=1, sort=title');
+			foreach ($products as $p) {
+				$prod->addOption($p->id, $p->title);
+			}
 			$fsMagic->add($prod);
 
 			// TTL
