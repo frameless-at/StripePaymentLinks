@@ -165,22 +165,19 @@ After creating the webhook, copy the **Webhook Signing Secret** from Stripe and 
 
 ## Magic Links
 
-**Magic Links** ermöglichen das manuelle Versenden von Access-Links für bereits gekaufte Produkte an Kunden.
+**Magic Links** allow manual sending of access links for already purchased products to customers.
 
-### Verwendung
+### Usage
 
-1. In der **Module Config** unter **Send Magic Links** öffnen:
-   - **Products**: Ein oder mehrere Produkte auswählen (nur Produkte mit `requires_access=1`)
-   - **Token validity**: Gültigkeitsdauer des Links in Minuten (1–10080)
-   - **Recipients**: E-Mail-Adressen eingeben (eine pro Zeile)
-   - **Test mode**: Erst mit aktiviertem Test-Modus prüfen (keine Emails versendet)
-   - **Send now**: Checkbox aktivieren und speichern zum Versenden
-
-2. Jeder Empfänger erhält **eine Email** mit Links zu **allen** ausgewählten Produkten, die er besitzt.
-
-3. Der Report zeigt, welche Emails versendet wurden und welche User keine der ausgewählten Produkte besitzen.
-
-> **Tipp:** Immer erst im Test-Modus prüfen, bevor tatsächlich E-Mails versendet werden!
+1. Open **Module Config** under **Send Magic Links**:
+   - **Products**: Select one or more products (only products with `requires_access=1`)
+   - **Token validity**: Link validity duration in minutes (1–10080)
+   - **Recipients**: Enter email addresses (one per line)
+   - **Test mode**: First check with test mode enabled (no emails sent)
+   - **Send now**: Activate checkbox and save to send
+2. Each recipient receives **one email** with links to **all** selected products they own.
+3. The report shows which emails were sent and which users don't own any of the selected products.
+> **Tip:** Always check in test mode first before actually sending emails!
 
 ---
 
