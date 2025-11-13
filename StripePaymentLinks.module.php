@@ -34,7 +34,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	public static function getModuleInfo(): array {
 		return [
 			'title'       => 'StripePaymentLinks',
-			'version'     => '1.0.15', 
+			'version'     => '1.0.16', 
 			'summary'     => 'Stripe payment-link redirects, user/purchases, magic link, mails, modals.',
 			'author'      => 'frameless Media',
 			'autoload'    => true,
@@ -403,7 +403,34 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	}
 	
 	/* ========================= Public API ========================= */
-	
+
+	/**
+	 * Finds an existing purchase item by Stripe session ID across all users.
+	 *
+	 * @param string $sessionId Stripe checkout session ID.
+	 * @return array|null Returns ['user' => User, 'item' => Page] or null if not found.
+	 */
+	protected function findExistingPurchaseBySessionId(string $sessionId): ?array {
+		if ($sessionId === '') return null;
+
+		$users = $this->wire('users');
+
+		foreach ($users as $u) {
+			if (!$u->hasField('spl_purchases') || !$u->spl_purchases->count()) continue;
+
+			foreach ($u->spl_purchases as $item) {
+				$session = (array) $item->meta('stripe_session');
+				$storedId = (string) ($session['id'] ?? '');
+
+				if ($storedId === $sessionId) {
+					return ['user' => $u, 'item' => $item];
+				}
+			}
+		}
+
+		return null;
+	}
+
 	/**
 	 * Renders the appropriate modals, access blocks, and JS for the current page context.
 	 *
@@ -561,11 +588,32 @@ public function processCheckout(Page $currentPage): void {
 	 
 	   $sessionId = $input->get->text('session_id');
 	   if (!$sessionId) return;
-	 
+
 	   // Idempotency (per browser session)
 	   $processed = $session->get('pl_processed_sessions') ?: [];
 	   if (in_array($sessionId, $processed, true)) return;
-	 
+
+	   // CRITICAL: Check if this session_id was already processed in the database
+	   $existing = $this->findExistingPurchaseBySessionId($sessionId);
+	   if ($existing !== null) {
+		   // Purchase already exists - mark as processed and skip
+		   $processed[] = $sessionId;
+		   $session->set('pl_processed_sessions', $processed);
+
+		   $this->wire('log')->save(
+			   self::LOG_PL,
+			   '[INFO] Duplicate session_id detected and prevented: ' . $sessionId .
+			   ' (already exists for user ' . $existing['user']->id . ')'
+		   );
+
+		   // Log user in if not already
+		   if (!$this->wire('user')->isLoggedin() || $this->wire('user')->id !== $existing['user']->id) {
+			   $this->wire('session')->forceLogin($existing['user']);
+		   }
+
+		   return;
+	   }
+
 	   // Stripe SDK
 	   $sdk = $this->stripeSdkPath ?? (__DIR__ . '/vendor/stripe-php/init.php');
 	   if (!is_file($sdk)) return;
