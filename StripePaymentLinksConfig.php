@@ -378,7 +378,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			$prod->label = 'Products (requires_access=1)';
 			$prod->description = 'Select one or multiple products.';
 			$prod->columnWidth = 50;
-			$products = $this->pages->find('template!=admin, requires_access=1, sort=title');
+			$products = $this->pages->find('template!=admin, requires_access=1, sort=title, include=hidden');
 			foreach ($products as $p) {
 				$prod->addOption($p->id, $p->title);
 			}
