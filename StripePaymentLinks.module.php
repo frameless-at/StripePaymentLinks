@@ -1935,9 +1935,9 @@ public function processCheckout(Page $currentPage): void {
 		 $toUser->save('spl_purchases');
 
 		 // Transfer all metadata
-		 $newItem->setMeta('product_ids', $purchase->meta('product_ids'));
-		 $newItem->setMeta('stripe_session', $purchase->meta('stripe_session'));
-		 $newItem->setMeta('period_end_map', $purchase->meta('period_end_map'));
+		 $newItem->meta('product_ids', $purchase->meta('product_ids'));
+		 $newItem->meta('stripe_session', $purchase->meta('stripe_session'));
+		 $newItem->meta('period_end_map', $purchase->meta('period_end_map'));
 		 $count++;
 	 }
 
