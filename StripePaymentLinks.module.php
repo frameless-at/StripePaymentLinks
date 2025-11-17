@@ -215,6 +215,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			$this->ensureCustomerRoleExists();
 			$this->triggerSyncStripeCustomers($data);
 			$this->triggerMagicLinks($data);
+			$this->triggerAccountMerge($data);
 		});
 		$this->addHookAfter('Pages::saveReady', function(\ProcessWire\HookEvent $event) {
 			$page = $event->arguments(0);
@@ -1573,6 +1574,69 @@ public function processCheckout(Page $currentPage): void {
 		}
 
 		$data['pl_magic_send'] = false;
+		$this->modules->saveConfig('StripePaymentLinks', $data);
+	  }
+
+	  /**
+	   * Trigger account merge from config and reset the flag.
+	   *
+	   * @param array $data Saved config values from Modules::saveConfig hook.
+	   * @return void
+	   */
+	  protected function triggerAccountMerge(array $data): void {
+		if (empty($data['pl_merge_run'])) return;
+
+		$fromEmail = trim((string)($data['pl_merge_from'] ?? ''));
+		$toEmail = trim((string)($data['pl_merge_to'] ?? ''));
+		$testMode = !empty($data['pl_merge_test']);
+
+		if (!$fromEmail || !$toEmail) {
+			$this->error('Account Merge: Please enter both source and target email addresses.');
+			$data['pl_merge_run'] = false;
+			$this->modules->saveConfig('StripePaymentLinks', $data);
+			return;
+		}
+
+		$report = [];
+		$report[] = $testMode ? '=== TEST MODE (no changes) ===' : '=== LIVE MERGE ===';
+		$report[] = "From: {$fromEmail}";
+		$report[] = "To: {$toEmail}";
+		$report[] = '';
+
+		if ($testMode) {
+			// Test mode: just check what would happen
+			$users = $this->wire('users');
+			$sanitizer = $this->wire('sanitizer');
+
+			$fromUser = $users->get("email=" . $sanitizer->email($fromEmail));
+			$toUser = $users->get("email=" . $sanitizer->email($toEmail));
+
+			if (!$fromUser || !$fromUser->id) {
+				$report[] = "ERROR: Source user not found: {$fromEmail}";
+			} elseif (!$toUser || !$toUser->id) {
+				$report[] = "ERROR: Target user not found: {$toEmail}";
+			} elseif ($fromUser->id === $toUser->id) {
+				$report[] = "ERROR: Source and target are the same user";
+			} else {
+				$count = $fromUser->spl_purchases->count();
+				$report[] = "Source account has {$count} purchase(s)";
+				$report[] = "Would transfer all to: {$toEmail}";
+				$report[] = "Source account would be deactivated";
+				$report[] = '';
+				$report[] = "Uncheck 'Test mode' and save again to execute.";
+			}
+		} else {
+			// Live merge
+			$result = $this->mergeUserPurchases($fromEmail, $toEmail);
+			$report[] = $result['message'];
+		}
+
+		$this->wire('session')->set('pl_merge_report', implode("\n", $report));
+
+		// Reset flags
+		$data['pl_merge_run'] = false;
+		$data['pl_merge_from'] = '';
+		$data['pl_merge_to'] = '';
 		$this->modules->saveConfig('StripePaymentLinks', $data);
 	  }
 
