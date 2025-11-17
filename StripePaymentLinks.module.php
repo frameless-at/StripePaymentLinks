@@ -1831,4 +1831,71 @@ public function processCheckout(Page $currentPage): void {
 
 	 return $results;
  }
+
+ /**
+  * Merge purchases from one user account into another.
+  *
+  * Use case: Customer purchased with email A, wants access via email B.
+  * Call: $modules->get('StripePaymentLinks')->mergeUserPurchases('old@email.com', 'new@email.com');
+  *
+  * @param string $fromEmail Source account email (purchases will be copied FROM here)
+  * @param string $toEmail Target account email (purchases will be copied TO here)
+  * @param bool $deleteSource Delete source account after merge (default: false, just unpublishes)
+  * @return array ['success' => bool, 'message' => string, 'transferred' => int]
+  */
+ public function mergeUserPurchases(string $fromEmail, string $toEmail, bool $deleteSource = false): array {
+	 $users = $this->wire('users');
+	 $sanitizer = $this->wire('sanitizer');
+
+	 $fromUser = $users->get("email=" . $sanitizer->email($fromEmail));
+	 $toUser = $users->get("email=" . $sanitizer->email($toEmail));
+
+	 if (!$fromUser || !$fromUser->id) {
+		 return ['success' => false, 'message' => "Source user not found: {$fromEmail}", 'transferred' => 0];
+	 }
+	 if (!$toUser || !$toUser->id) {
+		 return ['success' => false, 'message' => "Target user not found: {$toEmail}", 'transferred' => 0];
+	 }
+	 if ($fromUser->id === $toUser->id) {
+		 return ['success' => false, 'message' => "Source and target are the same user", 'transferred' => 0];
+	 }
+
+	 $count = 0;
+	 $toUser->of(false);
+
+	 foreach ($fromUser->spl_purchases as $purchase) {
+		 $newItem = $toUser->spl_purchases->getNew();
+		 $newItem->purchase_date = $purchase->purchase_date;
+		 $newItem->purchase_lines = $purchase->purchase_lines;
+		 $toUser->spl_purchases->add($newItem);
+		 $toUser->save('spl_purchases');
+
+		 // Transfer all metadata
+		 $newItem->setMeta('product_ids', $purchase->meta('product_ids'));
+		 $newItem->setMeta('stripe_session', $purchase->meta('stripe_session'));
+		 $newItem->setMeta('period_end_map', $purchase->meta('period_end_map'));
+		 $count++;
+	 }
+
+	 // Handle source account
+	 $fromUser->of(false);
+	 if ($deleteSource) {
+		 $users->delete($fromUser);
+		 $action = "deleted";
+	 } else {
+		 $fromUser->addStatus(Page::statusUnpublished);
+		 $fromUser->save();
+		 $action = "unpublished";
+	 }
+
+	 $this->wire('log')->save(self::LOG_PL,
+		 "[MERGE] {$fromEmail} → {$toEmail} • {$count} purchases transferred • source {$action}"
+	 );
+
+	 return [
+		 'success' => true,
+		 'message' => "Transferred {$count} purchases from {$fromEmail} to {$toEmail}. Source account {$action}.",
+		 'transferred' => $count
+	 ];
+ }
 }
