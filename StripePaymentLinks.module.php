@@ -1472,7 +1472,7 @@ public function processCheckout(Page $currentPage): void {
 		$buyer = $users->get("email=" . $sanitizer->email($email));
 
 		// Reaktiviere deaktivierten Account bei erneutem Kauf
-		if ($buyer && $buyer->id && !$buyer->isPublished()) {
+		if ($buyer && $buyer->id && $buyer->is(Page::statusUnpublished)) {
 			$buyer->of(false);
 			$buyer->removeStatus(Page::statusUnpublished);
 			$users->save($buyer);
