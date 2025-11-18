@@ -1466,11 +1466,19 @@ public function processCheckout(Page $currentPage): void {
 	protected function createUserFromStripe(string $email, string $fullName = ''): array {
 		$users     = $this->wire('users');
 		$sanitizer = $this->wire('sanitizer');
-	
+
 		$isNewUser = false;
 		/** @var User $buyer */
 		$buyer = $users->get("email=" . $sanitizer->email($email));
-	
+
+		// Reaktiviere deaktivierten Account bei erneutem Kauf
+		if ($buyer && $buyer->id && !$buyer->isPublished()) {
+			$buyer->of(false);
+			$buyer->removeStatus(Page::statusUnpublished);
+			$users->save($buyer);
+			$this->wire('log')->save(self::LOG_PL, "[REACTIVATE] User {$email} reactivated after new purchase");
+		}
+
 		if (!$buyer || !$buyer->id) {
 			$isNewUser = true;
 			$buyer = new User();
@@ -1489,9 +1497,9 @@ public function processCheckout(Page $currentPage): void {
 			$buyer->title = $fullName;
 			$users->save($buyer, ['quiet' => true]);
 		}
-	
+
 		$this->ensureCustomerRole($buyer);
-	
+
 		return ['user' => $buyer, 'isNew' => $isNewUser];
 	}
 	
