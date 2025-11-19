@@ -738,18 +738,20 @@ public function processCheckout(Page $currentPage): void {
 		   }
 		 }
 	 
-		 // ---- compute subscription product IDs (ONLY recurring) ----
-		 $subscriptionPids = [];
+		 // ---- compute subscription product scope keys (ONLY recurring) ----
+		 $subscriptionScopeKeys = [];
 		 if ($sub && isset($sub->items->data) && is_array($sub->items->data)) {
 		   foreach ($sub->items->data as $si) {
 			 $stripeProd = (string)($si->price->product ?? '');
 			 if ($stripeProd !== '') {
 			   $pid = $this->mapStripeProductToPageId($stripeProd);
-			   if ($pid) $subscriptionPids[] = (int)$pid;
+			   // Use scope key: either "$pid" for mapped or "0#$stripeProductId" for unmapped
+			   $scopeKey = $pid ? (string)$pid : '0#' . $stripeProd;
+			   $subscriptionScopeKeys[] = $scopeKey;
 			 }
 		   }
 		 }
-		 $subscriptionPids = array_values(array_unique(array_map('intval', $subscriptionPids)));
+		 $subscriptionScopeKeys = array_values(array_unique($subscriptionScopeKeys));
 
 		 // ---- persist repeater item ----
 		 if ($buyer->hasField('spl_purchases')) {
@@ -767,13 +769,13 @@ public function processCheckout(Page $currentPage): void {
 		   // 1) Write metas/lines WITHOUT period_end to avoid touching one-time products
 		   $this->plWriteMetasAndRebuild($item, $checkoutSession, $productIds, null, $paused, $canceled);
 
-		   // 2) If we do have a subscription end, apply it ONLY to the subscription product IDs
-		   if ($effectiveEnd && $subscriptionPids) {
+		   // 2) If we do have a subscription end, apply it ONLY to the subscription product scope keys
+		   if ($effectiveEnd && $subscriptionScopeKeys) {
 			 $map = (array)$item->meta('period_end_map');
 			 $changed = false;
-			 foreach ($subscriptionPids as $pid) {
-			   $old = isset($map[$pid]) && is_numeric($map[$pid]) ? (int)$map[$pid] : 0;
-			   if ($effectiveEnd > $old) { $map[(string)$pid] = (int)$effectiveEnd; $changed = true; }
+			 foreach ($subscriptionScopeKeys as $scopeKey) {
+			   $old = isset($map[$scopeKey]) && is_numeric($map[$scopeKey]) ? (int)$map[$scopeKey] : 0;
+			   if ($effectiveEnd > $old) { $map[$scopeKey] = (int)$effectiveEnd; $changed = true; }
 			 }
 			 if ($changed) {
 			   $item->meta('period_end_map', $map);
