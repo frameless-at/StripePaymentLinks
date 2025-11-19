@@ -742,6 +742,12 @@ public function processCheckout(Page $currentPage): void {
 		 $subscriptionScopeKeys = [];
 		 if ($sub && isset($sub->items->data) && is_array($sub->items->data)) {
 		   foreach ($sub->items->data as $si) {
+			 // CRITICAL: Only include items with recurring prices
+			 $priceType = (string)($si->price->type ?? '');
+			 if ($priceType !== '' && $priceType !== 'recurring') {
+			   continue; // Skip one-time prices
+			 }
+
 			 $stripeProd = (string)($si->price->product ?? '');
 			 if ($stripeProd !== '') {
 			   $pid = $this->mapStripeProductToPageId($stripeProd);

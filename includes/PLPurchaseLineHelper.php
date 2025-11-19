@@ -223,32 +223,48 @@ trait PLPurchaseLineHelper {
 	$item->meta('product_ids', $productIds);
 	$item->meta('stripe_session', $sessionArr);
   
-	// 3) Collect scope keys
+	// 3) Collect scope keys and identify recurring items
 	$scopeKeys = [];
+	$recurringScopeKeys = []; // Track which scope keys are recurring
 	$linesIn = $sessionArr['line_items']['data'] ?? [];
 	if (is_array($linesIn)) {
 	  foreach ($linesIn as $li) {
 		if (!is_array($li)) continue;
-		// Falls ein Override für diese SID existiert, erzwinge die PID als Scope-Key
+
+		// Determine scope key
 		$sid = $this->arrayStripeProductId($li);
 		if ($sid !== '' && isset($scopeOverrides[$sid]) && (int)$scopeOverrides[$sid] > 0) {
-		  $scopeKeys[] = (string)(int)$scopeOverrides[$sid];
+		  $scopeKey = (string)(int)$scopeOverrides[$sid];
+		  $scopeKeys[] = $scopeKey;
+		  // Check if this is a recurring price
+		  $priceType = (string)($li['price']['type'] ?? '');
+		  if ($priceType === 'recurring') {
+			$recurringScopeKeys[$scopeKey] = true;
+		  }
 		  continue;
 		}
+
 		$scope = $this->scopeKeyForArrayLineItem($li);
-		if ($scope !== '') $scopeKeys[] = $scope;
+		if ($scope !== '') {
+		  $scopeKeys[] = $scope;
+		  // Check if this is a recurring price
+		  $priceType = (string)($li['price']['type'] ?? '');
+		  if ($priceType === 'recurring') {
+			$recurringScopeKeys[$scope] = true;
+		  }
+		}
 	  }
 	}
 	$scopeKeys = array_values(array_unique($scopeKeys));
-  
-	// 4) Update period_end_map only for exact scope keys
+
+	// 4) Update period_end_map only for recurring scope keys
 	$map = (array) $item->meta('period_end_map');
 	foreach ($scopeKeys as $k) {
 	  $pKey = $k . '_paused';
 	  $cKey = $k . '_canceled';
-  
-	  // Raise end only
-	  if ($effectiveEnd) {
+
+	  // Raise end only for RECURRING items
+	  if ($effectiveEnd && isset($recurringScopeKeys[$k])) {
 		$map[$k] = max((int)($map[$k] ?? 0), $effectiveEnd);
 	  }
   
