@@ -752,23 +752,23 @@ public function processCheckout(Page $currentPage): void {
 		   }
 		 }
 		 $subscriptionScopeKeys = array_values(array_unique($subscriptionScopeKeys));
-	 
+
 		 // ---- persist repeater item ----
 		 if ($buyer->hasField('spl_purchases')) {
 		   $buyer->of(false);
 		   $item = $buyer->spl_purchases->getNew();
-	 
+
 		   $purchaseTs = (isset($checkoutSession->created) && is_numeric($checkoutSession->created))
 			 ? (int)$checkoutSession->created
 			 : time();
-	 
+
 		   $item->set('purchase_date', $purchaseTs);
 		   $buyer->spl_purchases->add($item);
 		   $this->wire('users')->save($buyer, ['quiet' => true]);
-	 
+
 		   // 1) Write metas/lines WITHOUT period_end to avoid touching one-time products
 		   $this->plWriteMetasAndRebuild($item, $checkoutSession, $productIds, null, $paused, $canceled);
-	 
+
 		   // 2) If we do have a subscription end, apply it ONLY to the subscription product scope keys
 		   if ($effectiveEnd && $subscriptionScopeKeys) {
 			 $map = (array)$item->meta('period_end_map');

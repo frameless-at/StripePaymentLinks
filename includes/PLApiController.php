@@ -429,38 +429,39 @@ private function scopeKeyFromStripeProduct(string $stripeProductId): string {
   private function scopeKeysFromInvoice($invoice): array {
 	$groups    = [];   // [ (string|null)$subId => array<string> $keys ]
 	$periodEnd = null;
-  
+
 	if (isset($invoice->lines->data) && is_array($invoice->lines->data)) {
 	  foreach ($invoice->lines->data as $line) {
 		// product key for the line
 		$prod = '';
 		if (isset($line->price) && isset($line->price->product)) $prod = (string)$line->price->product;
 		if ($prod === '') continue;
-  
+
 		$key  = $this->scopeKeyFromStripeProduct($prod);
-  
+
 		// subscription id on the line (may be missing)
 		$subId = null;
 		if (isset($line->subscription) && is_string($line->subscription) && $line->subscription !== '') {
 		  $subId = $line->subscription;
 		}
-  
+
 		if (!isset($groups[$subId])) $groups[$subId] = [];
 		$groups[$subId][] = $key;
-  
-		// capture period_end (take max)
-		if (isset($line->period->end) && is_numeric($line->period->end)) {
+
+		// capture period_end (take max) - ONLY for recurring prices
+		$priceType = (string)($line->price->type ?? '');
+		if ($priceType === 'recurring' && isset($line->period->end) && is_numeric($line->period->end)) {
 		  $end = (int)$line->period->end;
 		  if (!$periodEnd || $end > $periodEnd) $periodEnd = $end;
 		}
 	  }
 	}
-  
+
 	// de-dup keys per bucket
 	foreach ($groups as $sid => $keys) {
 	  $groups[$sid] = array_values(array_unique(array_filter($keys)));
 	}
-  
+
 	return ['groups' => $groups, 'period_end' => $periodEnd];
   }
     

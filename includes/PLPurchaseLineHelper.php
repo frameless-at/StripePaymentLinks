@@ -240,13 +240,13 @@ trait PLPurchaseLineHelper {
 	  }
 	}
 	$scopeKeys = array_values(array_unique($scopeKeys));
-  
+
 	// 4) Update period_end_map only for exact scope keys
 	$map = (array) $item->meta('period_end_map');
 	foreach ($scopeKeys as $k) {
 	  $pKey = $k . '_paused';
 	  $cKey = $k . '_canceled';
-  
+
 	  // Raise end only
 	  if ($effectiveEnd) {
 		$map[$k] = max((int)($map[$k] ?? 0), $effectiveEnd);
