@@ -740,24 +740,32 @@ public function processCheckout(Page $currentPage): void {
 	 
 		 // ---- compute subscription product scope keys (ONLY recurring) ----
 		 $subscriptionScopeKeys = [];
+		 $this->wire('log')->save(self::LOG_PL, 'DEBUG: Has subscription object: ' . ($sub ? 'YES' : 'NO'));
 		 if ($sub && isset($sub->items->data) && is_array($sub->items->data)) {
+		   $this->wire('log')->save(self::LOG_PL, 'DEBUG: Subscription items count: ' . count($sub->items->data));
 		   foreach ($sub->items->data as $si) {
 			 // CRITICAL: Only include items with recurring prices
 			 $priceType = (string)($si->price->type ?? '');
+			 $stripeProd = (string)($si->price->product ?? '');
+			 $this->wire('log')->save(self::LOG_PL, 'DEBUG: Sub item - product: ' . $stripeProd . ', price.type: ' . $priceType);
+
 			 if ($priceType !== '' && $priceType !== 'recurring') {
+			   $this->wire('log')->save(self::LOG_PL, 'DEBUG: Skipping non-recurring item: ' . $stripeProd);
 			   continue; // Skip one-time prices
 			 }
 
-			 $stripeProd = (string)($si->price->product ?? '');
 			 if ($stripeProd !== '') {
 			   $pid = $this->mapStripeProductToPageId($stripeProd);
 			   // Use scope key: either "$pid" for mapped or "0#$stripeProductId" for unmapped
 			   $scopeKey = $pid ? (string)$pid : '0#' . $stripeProd;
 			   $subscriptionScopeKeys[] = $scopeKey;
+			   $this->wire('log')->save(self::LOG_PL, 'DEBUG: Added subscription scope key: ' . $scopeKey);
 			 }
 		   }
 		 }
 		 $subscriptionScopeKeys = array_values(array_unique($subscriptionScopeKeys));
+		 $this->wire('log')->save(self::LOG_PL, 'DEBUG: Final subscriptionScopeKeys: ' . json_encode($subscriptionScopeKeys));
+		 $this->wire('log')->save(self::LOG_PL, 'DEBUG: effectiveEnd: ' . ($effectiveEnd ?: 'NULL'));
 	 
 		 // ---- persist repeater item ----
 		 if ($buyer->hasField('spl_purchases')) {
