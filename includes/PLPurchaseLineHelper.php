@@ -223,64 +223,33 @@ trait PLPurchaseLineHelper {
 	$item->meta('product_ids', $productIds);
 	$item->meta('stripe_session', $sessionArr);
   
-	// 3) Collect scope keys and identify recurring items
+	// 3) Collect scope keys
 	$scopeKeys = [];
-	$recurringScopeKeys = []; // Track which scope keys are recurring
 	$linesIn = $sessionArr['line_items']['data'] ?? [];
-	$this->wire('log')->save('stripepaymentlinks', 'DEBUG plWriteMetasAndRebuild: line_items count: ' . (is_array($linesIn) ? count($linesIn) : 0));
-	$this->wire('log')->save('stripepaymentlinks', 'DEBUG plWriteMetasAndRebuild: effectiveEnd param: ' . ($effectiveEnd ?: 'NULL'));
 	if (is_array($linesIn)) {
 	  foreach ($linesIn as $li) {
 		if (!is_array($li)) continue;
-
-		// Determine scope key
+		// Falls ein Override für diese SID existiert, erzwinge die PID als Scope-Key
 		$sid = $this->arrayStripeProductId($li);
-		$priceType = (string)($li['price']['type'] ?? '');
-		$productName = (string)($li['price']['product']['name'] ?? ($li['description'] ?? 'unknown'));
-		$this->wire('log')->save('stripepaymentlinks', 'DEBUG plWriteMetasAndRebuild: line_item - name: ' . $productName . ', stripe_product: ' . $sid . ', price.type: ' . $priceType);
-
 		if ($sid !== '' && isset($scopeOverrides[$sid]) && (int)$scopeOverrides[$sid] > 0) {
-		  $scopeKey = (string)(int)$scopeOverrides[$sid];
-		  $scopeKeys[] = $scopeKey;
-		  // Check if this is a recurring price
-		  if ($priceType === 'recurring') {
-			$recurringScopeKeys[$scopeKey] = true;
-			$this->wire('log')->save('stripepaymentlinks', 'DEBUG plWriteMetasAndRebuild: Marked as RECURRING: ' . $scopeKey);
-		  } else {
-			$this->wire('log')->save('stripepaymentlinks', 'DEBUG plWriteMetasAndRebuild: Marked as ONE-TIME: ' . $scopeKey);
-		  }
+		  $scopeKeys[] = (string)(int)$scopeOverrides[$sid];
 		  continue;
 		}
-
 		$scope = $this->scopeKeyForArrayLineItem($li);
-		if ($scope !== '') {
-		  $scopeKeys[] = $scope;
-		  // Check if this is a recurring price
-		  if ($priceType === 'recurring') {
-			$recurringScopeKeys[$scope] = true;
-			$this->wire('log')->save('stripepaymentlinks', 'DEBUG plWriteMetasAndRebuild: Marked as RECURRING: ' . $scope);
-		  } else {
-			$this->wire('log')->save('stripepaymentlinks', 'DEBUG plWriteMetasAndRebuild: Marked as ONE-TIME: ' . $scope);
-		  }
-		}
+		if ($scope !== '') $scopeKeys[] = $scope;
 	  }
 	}
 	$scopeKeys = array_values(array_unique($scopeKeys));
-	$this->wire('log')->save('stripepaymentlinks', 'DEBUG plWriteMetasAndRebuild: Final scopeKeys: ' . json_encode($scopeKeys));
-	$this->wire('log')->save('stripepaymentlinks', 'DEBUG plWriteMetasAndRebuild: Final recurringScopeKeys: ' . json_encode(array_keys($recurringScopeKeys)));
 
-	// 4) Update period_end_map only for recurring scope keys
+	// 4) Update period_end_map only for exact scope keys
 	$map = (array) $item->meta('period_end_map');
 	foreach ($scopeKeys as $k) {
 	  $pKey = $k . '_paused';
 	  $cKey = $k . '_canceled';
 
-	  // Raise end only for RECURRING items
-	  if ($effectiveEnd && isset($recurringScopeKeys[$k])) {
+	  // Raise end only
+	  if ($effectiveEnd) {
 		$map[$k] = max((int)($map[$k] ?? 0), $effectiveEnd);
-		$this->wire('log')->save('stripepaymentlinks', 'DEBUG plWriteMetasAndRebuild: SET period_end for ' . $k . ' to ' . $effectiveEnd);
-	  } elseif ($effectiveEnd && !isset($recurringScopeKeys[$k])) {
-		$this->wire('log')->save('stripepaymentlinks', 'DEBUG plWriteMetasAndRebuild: SKIPPED period_end for one-time product ' . $k);
 	  }
   
 	  // Flags: canceled dominates paused

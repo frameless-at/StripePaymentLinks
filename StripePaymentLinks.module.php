@@ -738,58 +738,42 @@ public function processCheckout(Page $currentPage): void {
 		   }
 		 }
 	 
-		 // ---- compute subscription product scope keys (ONLY recurring) ----
-		 $subscriptionScopeKeys = [];
-		 $this->wire('log')->save(self::LOG_PL, 'DEBUG: Has subscription object: ' . ($sub ? 'YES' : 'NO'));
+		 // ---- compute subscription product IDs (ONLY recurring) ----
+		 $subscriptionPids = [];
 		 if ($sub && isset($sub->items->data) && is_array($sub->items->data)) {
-		   $this->wire('log')->save(self::LOG_PL, 'DEBUG: Subscription items count: ' . count($sub->items->data));
 		   foreach ($sub->items->data as $si) {
-			 // CRITICAL: Only include items with recurring prices
-			 $priceType = (string)($si->price->type ?? '');
 			 $stripeProd = (string)($si->price->product ?? '');
-			 $this->wire('log')->save(self::LOG_PL, 'DEBUG: Sub item - product: ' . $stripeProd . ', price.type: ' . $priceType);
-
-			 if ($priceType !== '' && $priceType !== 'recurring') {
-			   $this->wire('log')->save(self::LOG_PL, 'DEBUG: Skipping non-recurring item: ' . $stripeProd);
-			   continue; // Skip one-time prices
-			 }
-
 			 if ($stripeProd !== '') {
 			   $pid = $this->mapStripeProductToPageId($stripeProd);
-			   // Use scope key: either "$pid" for mapped or "0#$stripeProductId" for unmapped
-			   $scopeKey = $pid ? (string)$pid : '0#' . $stripeProd;
-			   $subscriptionScopeKeys[] = $scopeKey;
-			   $this->wire('log')->save(self::LOG_PL, 'DEBUG: Added subscription scope key: ' . $scopeKey);
+			   if ($pid) $subscriptionPids[] = (int)$pid;
 			 }
 		   }
 		 }
-		 $subscriptionScopeKeys = array_values(array_unique($subscriptionScopeKeys));
-		 $this->wire('log')->save(self::LOG_PL, 'DEBUG: Final subscriptionScopeKeys: ' . json_encode($subscriptionScopeKeys));
-		 $this->wire('log')->save(self::LOG_PL, 'DEBUG: effectiveEnd: ' . ($effectiveEnd ?: 'NULL'));
-	 
+		 $subscriptionPids = array_values(array_unique(array_map('intval', $subscriptionPids)));
+
 		 // ---- persist repeater item ----
 		 if ($buyer->hasField('spl_purchases')) {
 		   $buyer->of(false);
 		   $item = $buyer->spl_purchases->getNew();
-	 
+
 		   $purchaseTs = (isset($checkoutSession->created) && is_numeric($checkoutSession->created))
 			 ? (int)$checkoutSession->created
 			 : time();
-	 
+
 		   $item->set('purchase_date', $purchaseTs);
 		   $buyer->spl_purchases->add($item);
 		   $this->wire('users')->save($buyer, ['quiet' => true]);
-	 
+
 		   // 1) Write metas/lines WITHOUT period_end to avoid touching one-time products
 		   $this->plWriteMetasAndRebuild($item, $checkoutSession, $productIds, null, $paused, $canceled);
-	 
-		   // 2) If we do have a subscription end, apply it ONLY to the subscription product scope keys
-		   if ($effectiveEnd && $subscriptionScopeKeys) {
+
+		   // 2) If we do have a subscription end, apply it ONLY to the subscription product IDs
+		   if ($effectiveEnd && $subscriptionPids) {
 			 $map = (array)$item->meta('period_end_map');
 			 $changed = false;
-			 foreach ($subscriptionScopeKeys as $scopeKey) {
-			   $old = isset($map[$scopeKey]) && is_numeric($map[$scopeKey]) ? (int)$map[$scopeKey] : 0;
-			   if ($effectiveEnd > $old) { $map[$scopeKey] = (int)$effectiveEnd; $changed = true; }
+			 foreach ($subscriptionPids as $pid) {
+			   $old = isset($map[$pid]) && is_numeric($map[$pid]) ? (int)$map[$pid] : 0;
+			   if ($effectiveEnd > $old) { $map[(string)$pid] = (int)$effectiveEnd; $changed = true; }
 			 }
 			 if ($changed) {
 			   $item->meta('period_end_map', $map);
