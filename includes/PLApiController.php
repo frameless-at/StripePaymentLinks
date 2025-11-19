@@ -429,38 +429,49 @@ private function scopeKeyFromStripeProduct(string $stripeProductId): string {
   private function scopeKeysFromInvoice($invoice): array {
 	$groups    = [];   // [ (string|null)$subId => array<string> $keys ]
 	$periodEnd = null;
-  
+
 	if (isset($invoice->lines->data) && is_array($invoice->lines->data)) {
+	  wire('log')->save(StripePaymentLinks::LOG_PL, 'DEBUG scopeKeysFromInvoice: Processing ' . count($invoice->lines->data) . ' invoice lines');
 	  foreach ($invoice->lines->data as $line) {
 		// product key for the line
 		$prod = '';
 		if (isset($line->price) && isset($line->price->product)) $prod = (string)$line->price->product;
 		if ($prod === '') continue;
-  
+
 		$key  = $this->scopeKeyFromStripeProduct($prod);
-  
+
 		// subscription id on the line (may be missing)
 		$subId = null;
 		if (isset($line->subscription) && is_string($line->subscription) && $line->subscription !== '') {
 		  $subId = $line->subscription;
 		}
-  
+
 		if (!isset($groups[$subId])) $groups[$subId] = [];
 		$groups[$subId][] = $key;
-  
-		// capture period_end (take max)
-		if (isset($line->period->end) && is_numeric($line->period->end)) {
+
+		// capture period_end (take max) - ONLY for recurring prices
+		$priceType = (string)($line->price->type ?? '');
+		$linePeriodEnd = isset($line->period->end) ? (int)$line->period->end : null;
+		wire('log')->save(
+		  StripePaymentLinks::LOG_PL,
+		  "DEBUG scopeKeysFromInvoice: Line - product: $prod, key: $key, price.type: $priceType, period.end: " . ($linePeriodEnd ?: 'NULL')
+		);
+
+		if ($priceType === 'recurring' && isset($line->period->end) && is_numeric($line->period->end)) {
 		  $end = (int)$line->period->end;
 		  if (!$periodEnd || $end > $periodEnd) $periodEnd = $end;
+		  wire('log')->save(StripePaymentLinks::LOG_PL, "DEBUG scopeKeysFromInvoice: SET period_end to $end for recurring product $prod");
+		} elseif ($priceType !== 'recurring' && $linePeriodEnd) {
+		  wire('log')->save(StripePaymentLinks::LOG_PL, "DEBUG scopeKeysFromInvoice: SKIPPED period_end for one-time product $prod (type: $priceType)");
 		}
 	  }
 	}
-  
+
 	// de-dup keys per bucket
 	foreach ($groups as $sid => $keys) {
 	  $groups[$sid] = array_values(array_unique(array_filter($keys)));
 	}
-  
+
 	return ['groups' => $groups, 'period_end' => $periodEnd];
   }
     
