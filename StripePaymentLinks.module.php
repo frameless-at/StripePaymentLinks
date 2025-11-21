@@ -220,6 +220,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			$page = $event->arguments(0);
 			$productTemplates = array_map('trim', $this->productTemplateNames ?? []);
 			if (in_array($page->template->name, $productTemplates)
+				&& !$page->isNew() // Exclude duplicated/new pages - only trigger for existing pages
 				&& $page->isChanged('requires_access')
 				&& $page->requires_access
 				&& !empty($page->stripe_product_id)){
