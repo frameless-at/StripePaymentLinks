@@ -1598,7 +1598,8 @@ public function processCheckout(Page $currentPage): void {
 	   
 		   foreach ($candidates as $u) {
 			   $userAffected = false;
-	   
+			   $hasActiveAccess = false; // Track if user has non-paused/non-canceled access
+
 			   if (!$u->hasField('spl_purchases') || !$u->spl_purchases->count()) {
 				   continue;
 			   }
@@ -1674,12 +1675,17 @@ public function processCheckout(Page $currentPage): void {
 					   $this->wire('log')->save(self::LOG_PL, '[updateUserAccessAndNotify] Error: '.$e->getMessage());
 				   }
 				   $this->plRebuildLinesAndSave($item, [
-					   $stripeId => (int)$pid,   
+					   $stripeId => (int)$pid,
 				   ]);
+
+				   // Check if this purchase has active (non-paused/non-canceled) access
+				   if (!array_key_exists($newPausedKey, $map) && !array_key_exists($newCanceledKey, $map)) {
+					   $hasActiveAccess = true;
+				   }
 			   }
 	   
-			   // If user had at least one matching purchase, ALWAYS send access email
-			   if ($userAffected) {
+			   // Only send access email if user has active (non-paused/non-canceled) access
+			   if ($userAffected && $hasActiveAccess) {
 				   $links = [];
 				   $url   = $product->httpUrl;
 
