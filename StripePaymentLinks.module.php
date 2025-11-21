@@ -27,14 +27,14 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	use PLPurchaseLineHelper;
 
 	/**
- 	* Returns ProcessWire module info array.
- 	*
- 	* @return array Module metadata for ProcessWire.
- 	*/
+	 * Returns ProcessWire module info array.
+	 *
+	 * @return array Module metadata for ProcessWire.
+	 */
 	public static function getModuleInfo(): array {
 		return [
 			'title'       => 'StripePaymentLinks',
-			'version'     => '1.0.17', 
+			'version'     => '1.0.18', 
 			'summary'     => 'Stripe payment-link redirects, user/purchases, magic link, mails, modals.',
 			'author'      => 'frameless Media',
 			'autoload'    => true,
@@ -220,6 +220,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			$page = $event->arguments(0);
 			$productTemplates = array_map('trim', $this->productTemplateNames ?? []);
 			if (in_array($page->template->name, $productTemplates)
+				&& !$page->isNew() // Exclude duplicated/new pages - only trigger for existing pages
 				&& $page->isChanged('requires_access')
 				&& $page->requires_access
 				&& !empty($page->stripe_product_id)){
@@ -1169,7 +1170,7 @@ public function processCheckout(Page $currentPage): void {
 		 $fStripe = $ensure('stripe_product_id',        'FieldtypeText',     'Stripe Product ID');
 		 $fReq    = $ensure('requires_access',          'FieldtypeCheckbox', 'Product: requires access/delivery page');
 		 $fAllow  = $ensure('allow_multiple_purchases', 'FieldtypeCheckbox', 'Product: allows multiple purchases');
-	 	 $fAddon  = $ensure('access_mail_addon_txt',    'FieldtypeText',     'Access Mail Intro Text (optional)');
+		  $fAddon  = $ensure('access_mail_addon_txt',    'FieldtypeText',     'Access Mail Intro Text (optional)');
 
 		 // Determine templates to attach to
 		 if ($templateNames === null) {
@@ -1597,7 +1598,8 @@ public function processCheckout(Page $currentPage): void {
 	   
 		   foreach ($candidates as $u) {
 			   $userAffected = false;
-	   
+			   $hasActiveAccess = false; // Track if user has non-paused/non-canceled access
+
 			   if (!$u->hasField('spl_purchases') || !$u->spl_purchases->count()) {
 				   continue;
 			   }
@@ -1673,12 +1675,17 @@ public function processCheckout(Page $currentPage): void {
 					   $this->wire('log')->save(self::LOG_PL, '[updateUserAccessAndNotify] Error: '.$e->getMessage());
 				   }
 				   $this->plRebuildLinesAndSave($item, [
-					   $stripeId => (int)$pid,   
+					   $stripeId => (int)$pid,
 				   ]);
+
+				   // Check if this purchase has active (non-paused/non-canceled) access
+				   if (!array_key_exists($newPausedKey, $map) && !array_key_exists($newCanceledKey, $map)) {
+					   $hasActiveAccess = true;
+				   }
 			   }
 	   
-			   // If user had at least one matching purchase, ALWAYS send access email
-			   if ($userAffected) {
+			   // Only send access email if user has active (non-paused/non-canceled) access
+			   if ($userAffected && $hasActiveAccess) {
 				   $links = [];
 				   $url   = $product->httpUrl;
 
