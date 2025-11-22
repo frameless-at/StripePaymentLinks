@@ -264,7 +264,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 		$out .= "<div style='display:flex;gap:1em;flex-wrap:wrap;align-items:end;'>";
 
 		// Email filter
-		$out .= "<div><label>Email</label><input type='email' name='filter_email' value='" . htmlspecialchars($email) . "' style='width:200px;'></div>";
+		$out .= "<div><label class='uk-form-label'>Email</label><input type='email' name='filter_email' class='uk-input' value='" . htmlspecialchars($email) . "' style='width:200px;'></div>";
 
 		// Product filter - use configured product templates from main module
 		$mainModule = $modules->get('StripePaymentLinks');
@@ -276,7 +276,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 			$products = $pages->find("{$tplSelector}, sort=title, include=all");
 		}
 
-		$out .= "<div><label>Product</label><select name='filter_product' style='width:200px;'>";
+		$out .= "<div><label class='uk-form-label'>Product</label><select name='filter_product' class='uk-select' style='width:200px;'>";
 		$out .= "<option value=''>All Products</option>";
 		foreach ($products as $p) {
 			$sel = ($p->id === $product) ? 'selected' : '';
@@ -285,8 +285,8 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 		$out .= "</select></div>";
 
 		// Date range
-		$out .= "<div><label>From</label><input type='date' name='filter_from' value='" . htmlspecialchars($from) . "'></div>";
-		$out .= "<div><label>To</label><input type='date' name='filter_to' value='" . htmlspecialchars($to) . "'></div>";
+		$out .= "<div><label class='uk-form-label'>From</label><input type='date' name='filter_from' class='uk-input' value='" . htmlspecialchars($from) . "'></div>";
+		$out .= "<div><label class='uk-form-label'>To</label><input type='date' name='filter_to' class='uk-input' value='" . htmlspecialchars($to) . "'></div>";
 
 		$out .= "<div><button type='submit' class='ui-button'>Filter</button></div>";
 		$out .= "<div><a href='{$this->page->url}' class='ui-button ui-priority-secondary'>Reset</a></div>";
