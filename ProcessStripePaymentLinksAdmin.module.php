@@ -483,7 +483,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 				?? '';
 
 			if ($name && !in_array($name, $titles)) {
-				$titles[] = $name . ' (unmapped)';
+				$titles[] = $name;
 			}
 		}
 
