@@ -495,14 +495,22 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 	 */
 	protected function computeSubscriptionStatus(User $user, Page $item): string {
 		$map = (array)$item->meta('period_end_map');
-		$productIds = (array)$item->meta('product_ids');
+
+		if (empty($map)) {
+			return 'lifetime';
+		}
 
 		$statuses = [];
-		foreach ($productIds as $pid) {
-			$pid = (int)$pid;
-			if ($pid === 0) continue;
+		$processedKeys = [];
 
-			$key = (string)$pid;
+		// Iterate over all keys in period_end_map
+		foreach ($map as $key => $val) {
+			// Skip flag keys
+			if (strpos($key, '_paused') !== false || strpos($key, '_canceled') !== false) {
+				continue;
+			}
+
+			$processedKeys[] = $key;
 			$pausedKey = $key . '_paused';
 			$canceledKey = $key . '_canceled';
 
@@ -510,16 +518,18 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 				$statuses[] = 'canceled';
 			} elseif (isset($map[$pausedKey])) {
 				$statuses[] = 'paused';
-			} elseif (isset($map[$key]) && is_numeric($map[$key])) {
-				$end = (int)$map[$key];
+			} elseif (is_numeric($val)) {
+				$end = (int)$val;
 				if ($end < time()) {
 					$statuses[] = 'expired';
 				} else {
 					$statuses[] = 'active';
 				}
-			} else {
-				$statuses[] = 'lifetime';
 			}
+		}
+
+		if (empty($statuses)) {
+			return 'lifetime';
 		}
 
 		$statuses = array_unique($statuses);
@@ -534,7 +544,10 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 
 		$dates = [];
 		foreach ($map as $key => $val) {
-			if (strpos($key, '_') !== false) continue; // skip flags
+			// Skip flag keys
+			if (strpos($key, '_paused') !== false || strpos($key, '_canceled') !== false) {
+				continue;
+			}
 			if (is_numeric($val)) {
 				$dates[] = date('Y-m-d', (int)$val);
 			}
