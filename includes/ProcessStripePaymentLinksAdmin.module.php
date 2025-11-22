@@ -18,12 +18,8 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 			'requires'    => ['StripePaymentLinks'],
 			'page'        => [
 				'name'   => 'stripe-purchases',
-				'parent' => 'access',
-				'title'  => 'Purchases',
-			],
-			'permission'  => 'stripe-purchases-view',
-			'permissions' => [
-				'stripe-purchases-view' => 'View Stripe Purchases'
+				'parent' => 'setup',
+				'title'  => 'Stripe Purchases',
 			],
 		];
 	}
