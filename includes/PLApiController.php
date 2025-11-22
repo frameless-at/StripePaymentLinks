@@ -73,24 +73,51 @@ final class PLApiController {
 	*/
    public function handleStripeWebhook(\ProcessWire\HookEvent $e): void {
 	 $e->replace = true;
-   
+
 	 $payload   = file_get_contents('php://input') ?: '';
 	 $sigHeader = $_SERVER['HTTP_STRIPE_SIGNATURE'] ?? '';
-	 $secret    = (string)($this->mod->webhookSecret ?? '');
-   
-	 if ($secret === '') {
+
+	 // Get all configured webhook secrets
+	 $secrets = $this->mod->getWebhookSecrets();
+
+	 if (!$secrets) {
 	   http_response_code(500);
-	   $e->return = 'Missing webhook secret';
+	   $e->return = 'No webhook secrets configured';
+	   wire('log')->save(StripePaymentLinks::LOG_PL, '[WEBHOOK] No webhook secrets configured');
 	   return;
 	 }
-   
-	 try {
-	   if (!class_exists('\Stripe\Webhook')) {
-		 require_once($this->mod->stripeSdkPath ?? (__DIR__ . '/../vendor/stripe-php/init.php'));
+
+	 // Ensure Stripe SDK is loaded
+	 if (!class_exists('\Stripe\Webhook')) {
+	   require_once($this->mod->stripeSdkPath ?? (__DIR__ . '/../vendor/stripe-php/init.php'));
+	 }
+
+	 // Try each secret until one validates the signature
+	 $event = null;
+	 $lastError = null;
+
+	 foreach ($secrets as $index => $secret) {
+	   try {
+		 $event = \Stripe\Webhook::constructEvent($payload, $sigHeader, $secret);
+		 // Signature validated successfully
+		 wire('log')->save(StripePaymentLinks::LOG_PL, '[WEBHOOK] Signature validated with secret #' . $index);
+		 break;
+	   } catch (\Stripe\Exception\SignatureVerificationException $ex) {
+		 // Signature failed with this secret, try next one
+		 $lastError = $ex;
+		 continue;
+	   } catch (\Throwable $ex) {
+		 // Other error (e.g., invalid JSON) - don't retry
+		 wire('log')->save(StripePaymentLinks::LOG_PL, '[WEBHOOK] Parse error: ' . $ex->getMessage());
+		 http_response_code(400);
+		 $e->return = 'Invalid webhook format';
+		 return;
 	   }
-	   $event = \Stripe\Webhook::constructEvent($payload, $sigHeader, $secret);
-	 } catch (\Throwable $ex) {
-	   wire('log')->save(StripePaymentLinks::LOG_PL, '[WEBHOOK] signature error: ' . $ex->getMessage());
+	 }
+
+	 // If no secret validated the signature
+	 if ($event === null) {
+	   wire('log')->save(StripePaymentLinks::LOG_PL, '[WEBHOOK] No secret validated signature. Last error: ' . ($lastError ? $lastError->getMessage() : 'unknown'));
 	   http_response_code(400);
 	   $e->return = 'Invalid signature';
 	   return;
