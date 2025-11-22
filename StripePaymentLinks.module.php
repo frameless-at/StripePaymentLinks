@@ -250,7 +250,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		$modules = $this->wire('modules');
 
 		// Register the module path
-		$adminModulePath = __DIR__ . '/includes/ProcessStripePaymentLinksAdmin.module.php';
+		$adminModulePath = __DIR__ . '/ProcessStripePaymentLinksAdmin.module.php';
 		if (!is_file($adminModulePath)) {
 			$this->wire('log')->save(self::LOG_PL, 'Admin module file not found: ' . $adminModulePath);
 			return;
