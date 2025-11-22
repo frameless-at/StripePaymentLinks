@@ -81,12 +81,13 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		$f->icon = 'key';
 		$fs->add($f);
 		
-		// Webhook Signing Secret (password field)
-		$fWebhook = $this->modules->get('InputfieldText');
+		// Webhook Signing Secrets (multiple)
+		$fWebhook = $this->modules->get('InputfieldTextarea');
 		$fWebhook->name  = 'webhookSecret';
-		$fWebhook->label = 'Stripe Webhook Signing Secret (optional)';
-		$fWebhook->value = (string)($data['webhookSecret'] ?? '');
-		$fWebhook->notes = 'Used to verify incoming Stripe webhook events. Only neccessary for handling subscriptions.';
+		$fWebhook->label = 'Stripe Webhook Signing Secrets';
+		$fWebhook->value = (string)($this->get('webhookSecret') ?? '');
+		$fWebhook->notes = 'Enter one secret per line. The module will try each secret until one validates the signature. Required for handling subscriptions.';
+		$fWebhook->attr('rows', 4);
 		$fs->add($fWebhook);
 		
 		// Product templates (AsmSelect)

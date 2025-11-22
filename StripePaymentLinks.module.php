@@ -1212,6 +1212,15 @@ public function processCheckout(Page $currentPage): void {
 		}
 		return array_values(array_unique(array_filter(array_map('trim', (array) $cfgKeys))));
 	}
+
+	/** Collect Stripe Webhook Signing Secrets from config (multi-line textarea). */
+	public function getWebhookSecrets(): array {
+		$cfgSecrets = $this->webhookSecret ?? [];
+		if (is_string($cfgSecrets)) {
+			$cfgSecrets = preg_split('~\r\n|\r|\n~', $cfgSecrets) ?: [];
+		}
+		return array_values(array_unique(array_filter(array_map('trim', (array) $cfgSecrets))));
+	}
 	
 	/**
 	 * Retrieve a checkout session using any configured key.
