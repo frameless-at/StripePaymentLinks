@@ -757,7 +757,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 				]);
 			}
 
-			$out .= $table->render();
+			$out .= "<div style='margin-top:-1px'>" . $table->render() . "</div>";
 		}
 
 		return $out;
