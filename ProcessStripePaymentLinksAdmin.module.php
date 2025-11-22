@@ -110,6 +110,9 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 		$this->headline('Customer Purchases');
 		$this->browserTitle('Purchases');
 
+		// Tab navigation
+		$out = $this->renderTabs('purchases');
+
 		$input = $this->wire('input');
 		$users = $this->wire('users');
 		$sanitizer = $this->wire('sanitizer');
@@ -125,7 +128,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 		$filterDateTo = $sanitizer->text($input->get('filter_to'));
 
 		// Build filter form
-		$out = $this->renderFilterForm($filterEmail, $filterProduct, $filterDateFrom, $filterDateTo);
+		$out .= $this->renderFilterForm($filterEmail, $filterProduct, $filterDateFrom, $filterDateTo);
 
 		// Collect all purchases
 		$allPurchases = [];
@@ -622,6 +625,139 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 		}
 
 		$out .= "</div>";
+
+		return $out;
+	}
+
+	/**
+	 * Render tab navigation
+	 */
+	protected function renderTabs(string $active): string {
+		$baseUrl = $this->page->url;
+
+		$tabs = [
+			'purchases' => ['url' => $baseUrl, 'label' => 'Purchases'],
+			'products' => ['url' => $baseUrl . 'products/', 'label' => 'Products'],
+		];
+
+		$out = "<ul class='PageListActions' style='margin-bottom:1em;'>";
+		foreach ($tabs as $key => $tab) {
+			$class = ($key === $active) ? 'on' : '';
+			$out .= "<li><a href='{$tab['url']}' class='{$class}'>{$tab['label']}</a></li>";
+		}
+		$out .= "</ul>";
+
+		return $out;
+	}
+
+	/**
+	 * Products overview - aggregated by product
+	 */
+	public function ___executeProducts(): string {
+		$this->headline('Products Overview');
+		$this->browserTitle('Products');
+
+		$out = $this->renderTabs('products');
+
+		$users = $this->wire('users');
+		$pages = $this->wire('pages');
+
+		// Aggregate data per product
+		$productData = [];
+
+		foreach ($users->find("spl_purchases.count>0") as $user) {
+			foreach ($user->spl_purchases as $item) {
+				$session = (array)$item->meta('stripe_session');
+				$lineItems = $session['line_items']['data'] ?? [];
+				$productIds = (array)$item->meta('product_ids');
+				$purchaseDate = (int)$item->get('purchase_date');
+
+				// Process each line item
+				foreach ($lineItems as $li) {
+					$stripeProductId = $li['price']['product']['id'] ?? ($li['price']['product'] ?? '');
+					if (is_array($stripeProductId)) $stripeProductId = $stripeProductId['id'] ?? '';
+
+					$productName = $li['price']['product']['name']
+						?? $li['description']
+						?? $li['price']['nickname']
+						?? 'Unknown';
+
+					$amount = (int)($li['amount_total'] ?? 0);
+					$currency = strtoupper($li['currency'] ?? $session['currency'] ?? 'EUR');
+					$quantity = (int)($li['quantity'] ?? 1);
+
+					// Find mapped page ID
+					$pageId = 0;
+					foreach ($productIds as $pid) {
+						$pid = (int)$pid;
+						if ($pid === 0) continue;
+						$p = $pages->get($pid);
+						if ($p && $p->id && $p->hasField('stripe_product_id') && $p->stripe_product_id === $stripeProductId) {
+							$pageId = $pid;
+							$productName = $p->title;
+							break;
+						}
+					}
+
+					// Use stripe product ID as key for unmapped
+					$key = $pageId ?: ('stripe:' . $stripeProductId);
+
+					if (!isset($productData[$key])) {
+						$productData[$key] = [
+							'name' => $productName,
+							'page_id' => $pageId,
+							'stripe_id' => $stripeProductId,
+							'count' => 0,
+							'quantity' => 0,
+							'revenue' => 0,
+							'currency' => $currency,
+							'last_purchase' => 0,
+						];
+					}
+
+					$productData[$key]['count']++;
+					$productData[$key]['quantity'] += $quantity;
+					$productData[$key]['revenue'] += $amount;
+					if ($purchaseDate > $productData[$key]['last_purchase']) {
+						$productData[$key]['last_purchase'] = $purchaseDate;
+					}
+				}
+			}
+		}
+
+		// Sort by count descending
+		uasort($productData, fn($a, $b) => $b['count'] <=> $a['count']);
+
+		// Render table
+		if (empty($productData)) {
+			$out .= "<p>No products found.</p>";
+		} else {
+			$table = $this->modules->get('MarkupAdminDataTable');
+			$table->setEncodeEntities(false);
+			$table->setSortable(true);
+			$table->headerRow(['Product', 'Purchases', 'Quantity', 'Revenue', 'Last Purchase']);
+
+			foreach ($productData as $data) {
+				$name = htmlspecialchars($data['name']);
+				if ($data['page_id']) {
+					$editUrl = $this->wire('config')->urls->admin . "page/edit/?id={$data['page_id']}";
+					$name = "<a href='{$editUrl}'>{$name}</a>";
+				}
+
+				$revenue = number_format($data['revenue'] / 100, 2) . ' ' . $data['currency'];
+				$lastPurchase = $data['last_purchase'] ? date('Y-m-d', $data['last_purchase']) : '-';
+
+				$table->row([
+					$name,
+					$data['count'],
+					$data['quantity'],
+					$revenue,
+					$lastPurchase
+				]);
+			}
+
+			$out .= $table->render();
+		}
 
 		return $out;
 	}
