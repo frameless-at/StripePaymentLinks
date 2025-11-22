@@ -258,6 +258,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 	 */
 	protected function renderFilterForm(string $email, int $product, string $from, string $to): string {
 		$pages = $this->wire('pages');
+		$modules = $this->wire('modules');
 
 		$out = "<form method='get' class='InputfieldForm' style='margin-bottom:1em;'>";
 		$out .= "<div style='display:flex;gap:1em;flex-wrap:wrap;align-items:end;'>";
@@ -265,8 +266,16 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 		// Email filter
 		$out .= "<div><label>Email</label><input type='email' name='filter_email' value='" . htmlspecialchars($email) . "' style='width:200px;'></div>";
 
-		// Product filter
-		$products = $pages->find('requires_access=1, sort=title');
+		// Product filter - use configured product templates from main module
+		$mainModule = $modules->get('StripePaymentLinks');
+		$tplNames = (array)($mainModule->productTemplateNames ?? []);
+
+		$products = new PageArray();
+		if (!empty($tplNames)) {
+			$tplSelector = 'template=' . implode('|', array_map('trim', $tplNames));
+			$products = $pages->find("{$tplSelector}, sort=title, include=all");
+		}
+
 		$out .= "<div><label>Product</label><select name='filter_product' style='width:200px;'>";
 		$out .= "<option value=''>All Products</option>";
 		foreach ($products as $p) {
@@ -434,19 +443,47 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 	}
 
 	/**
-	 * Compute product titles from IDs
+	 * Compute product titles from IDs and stripe session line items
 	 */
 	protected function computeProductTitles(User $user, Page $item): string {
 		$pages = $this->wire('pages');
 		$productIds = (array)$item->meta('product_ids');
+		$session = (array)$item->meta('stripe_session');
+		$lineItems = $session['line_items']['data'] ?? [];
 
 		$titles = [];
+		$mappedStripeIds = [];
+
+		// First get titles from mapped product IDs
 		foreach ($productIds as $pid) {
 			$pid = (int)$pid;
 			if ($pid === 0) continue;
 			$p = $pages->get($pid);
 			if ($p && $p->id) {
 				$titles[] = $p->title;
+				// Track the stripe_product_id if available
+				if ($p->hasField('stripe_product_id') && $p->stripe_product_id) {
+					$mappedStripeIds[] = $p->stripe_product_id;
+				}
+			}
+		}
+
+		// Then add unmapped products from line items
+		foreach ($lineItems as $li) {
+			$stripeProductId = $li['price']['product']['id'] ?? ($li['price']['product'] ?? '');
+			if (is_array($stripeProductId)) $stripeProductId = $stripeProductId['id'] ?? '';
+
+			// Skip if already mapped
+			if (in_array($stripeProductId, $mappedStripeIds)) continue;
+
+			// Get product name from line item
+			$name = $li['price']['product']['name']
+				?? $li['description']
+				?? $li['price']['nickname']
+				?? '';
+
+			if ($name && !in_array($name, $titles)) {
+				$titles[] = $name . ' (unmapped)';
 			}
 		}
 
