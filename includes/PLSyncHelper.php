@@ -473,7 +473,6 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
                'subscription' => $subId,
                'status' => 'paid',
                'limit' => 100,
-               'expand' => ['data.lines.data.price.product'],
            ];
 
            $startingAfter = null;
