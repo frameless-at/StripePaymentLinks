@@ -317,21 +317,14 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 		$f->value = $to;
 		$form->add($f);
 
-		// Buttons
-		/** @var InputfieldSubmit $f */
-		$f = $modules->get('InputfieldSubmit');
-		$f->name = 'submit';
-		$f->value = 'Filter';
-		$f->columnWidth = 10;
-		$form->add($f);
-
-		/** @var InputfieldButton $f */
-		$f = $modules->get('InputfieldButton');
-		$f->name = 'reset';
-		$f->value = 'Reset';
-		$f->href = $this->page->url;
-		$f->columnWidth = 10;
-		$f->addClass('ui-priority-secondary');
+		// Buttons wrapper
+		/** @var InputfieldMarkup $f */
+		$f = $modules->get('InputfieldMarkup');
+		$f->name = 'buttons';
+		$f->label = ' ';
+		$f->columnWidth = 20;
+		$f->value = "<button type='submit' class='ui-button ui-state-default'><span class='ui-button-text'>Filter</span></button> ";
+		$f->value .= "<a href='{$this->page->url}' class='ui-button ui-state-default ui-priority-secondary'><span class='ui-button-text'>Reset</span></a>";
 		$form->add($f);
 
 		return $form->render();
