@@ -640,10 +640,10 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 			'products' => ['url' => $baseUrl . 'products/', 'label' => 'Products'],
 		];
 
-		$out = "<ul class='PageListActions' style='margin-bottom:1em;'>";
+		$out = "<ul class='WireTabs nav' role='tablist'>";
 		foreach ($tabs as $key => $tab) {
 			$class = ($key === $active) ? 'on' : '';
-			$out .= "<li><a href='{$tab['url']}' class='{$class}'>{$tab['label']}</a></li>";
+			$out .= "<li class='{$class}'><a href='{$tab['url']}'>{$tab['label']}</a></li>";
 		}
 		$out .= "</ul>";
 
