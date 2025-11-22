@@ -260,40 +260,81 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 		$pages = $this->wire('pages');
 		$modules = $this->wire('modules');
 
-		$out = "<form method='get' class='InputfieldForm' style='margin-bottom:1em;'>";
-		$out .= "<div style='display:flex;gap:1em;flex-wrap:wrap;align-items:end;'>";
+		// Build form using ProcessWire Inputfields for consistent styling
+		/** @var InputfieldForm $form */
+		$form = $modules->get('InputfieldForm');
+		$form->method = 'get';
+		$form->action = './';
 
 		// Email filter
-		$out .= "<div><label class='uk-form-label'>Email</label><input type='email' name='filter_email' class='uk-input' value='" . htmlspecialchars($email) . "' style='width:200px;'></div>";
+		/** @var InputfieldEmail $f */
+		$f = $modules->get('InputfieldEmail');
+		$f->name = 'filter_email';
+		$f->label = 'Email';
+		$f->columnWidth = 25;
+		$f->value = $email;
+		$f->collapsed = Inputfield::collapsedNever;
+		$form->add($f);
 
-		// Product filter - use configured product templates from main module
+		// Product filter
 		$mainModule = $modules->get('StripePaymentLinks');
 		$tplNames = (array)($mainModule->productTemplateNames ?? []);
 
-		$products = new PageArray();
+		/** @var InputfieldSelect $f */
+		$f = $modules->get('InputfieldSelect');
+		$f->name = 'filter_product';
+		$f->label = 'Product';
+		$f->columnWidth = 25;
+		$f->addOption('', 'All Products');
+
 		if (!empty($tplNames)) {
 			$tplSelector = 'template=' . implode('|', array_map('trim', $tplNames));
 			$products = $pages->find("{$tplSelector}, sort=title, include=all");
+			foreach ($products as $p) {
+				$f->addOption($p->id, $p->title);
+			}
 		}
+		$f->value = $product ?: '';
+		$form->add($f);
 
-		$out .= "<div><label class='uk-form-label'>Product</label><select name='filter_product' class='uk-select' style='width:200px;'>";
-		$out .= "<option value=''>All Products</option>";
-		foreach ($products as $p) {
-			$sel = ($p->id === $product) ? 'selected' : '';
-			$out .= "<option value='{$p->id}' {$sel}>" . htmlspecialchars($p->title) . "</option>";
-		}
-		$out .= "</select></div>";
+		// From date
+		/** @var InputfieldText $f */
+		$f = $modules->get('InputfieldText');
+		$f->name = 'filter_from';
+		$f->label = 'From';
+		$f->attr('type', 'date');
+		$f->columnWidth = 15;
+		$f->value = $from;
+		$form->add($f);
 
-		// Date range
-		$out .= "<div><label class='uk-form-label'>From</label><input type='date' name='filter_from' class='uk-input' value='" . htmlspecialchars($from) . "'></div>";
-		$out .= "<div><label class='uk-form-label'>To</label><input type='date' name='filter_to' class='uk-input' value='" . htmlspecialchars($to) . "'></div>";
+		// To date
+		/** @var InputfieldText $f */
+		$f = $modules->get('InputfieldText');
+		$f->name = 'filter_to';
+		$f->label = 'To';
+		$f->attr('type', 'date');
+		$f->columnWidth = 15;
+		$f->value = $to;
+		$form->add($f);
 
-		$out .= "<div><button type='submit' class='ui-button'>Filter</button></div>";
-		$out .= "<div><a href='{$this->page->url}' class='ui-button ui-priority-secondary'>Reset</a></div>";
+		// Buttons
+		/** @var InputfieldSubmit $f */
+		$f = $modules->get('InputfieldSubmit');
+		$f->name = 'submit';
+		$f->value = 'Filter';
+		$f->columnWidth = 10;
+		$form->add($f);
 
-		$out .= "</div></form>";
+		/** @var InputfieldButton $f */
+		$f = $modules->get('InputfieldButton');
+		$f->name = 'reset';
+		$f->value = 'Reset';
+		$f->href = $this->page->url;
+		$f->columnWidth = 10;
+		$f->addClass('ui-priority-secondary');
+		$form->add($f);
 
-		return $out;
+		return $form->render();
 	}
 
 	/**
