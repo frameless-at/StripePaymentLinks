@@ -400,8 +400,20 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 		foreach ($purchases as $purchase) {
 			$row = [];
 			foreach ($columns as $col) {
-				$value = $this->getColumnValue($purchase['user'], $purchase['item'], $col);
-				$row[] = $value;
+				// Handle amount_total directly to avoid escaping issues
+				if ($col === 'amount_total') {
+					$session = (array)$purchase['item']->meta('stripe_session');
+					$lineItems = $session['line_items']['data'] ?? [];
+					$total = 0;
+					$currency = '';
+					foreach ($lineItems as $li) {
+						$total += (int)($li['amount_total'] ?? 0);
+						if (!$currency) $currency = strtoupper($li['currency'] ?? $session['currency'] ?? '');
+					}
+					$row[] = $total > 0 ? $this->formatPrice($total, $currency) : '';
+				} else {
+					$row[] = $this->getColumnValue($purchase['user'], $purchase['item'], $col);
+				}
 			}
 			$table->row($row);
 		}
