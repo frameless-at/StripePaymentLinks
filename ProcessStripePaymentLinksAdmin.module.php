@@ -138,7 +138,6 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 		$f->name = 'itemsPerPage';
 		$f->label = 'Items per page';
 		$f->value = $data['itemsPerPage'];
-		$f->min = 10;
 		$f->max = 500;
 		$tab3->add($f);
 
