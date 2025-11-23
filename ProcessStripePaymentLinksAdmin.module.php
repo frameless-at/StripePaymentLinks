@@ -500,7 +500,24 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 
 		if ($total === 0) return '';
 
-		return number_format($total / 100, 2) . ' ' . $currency;
+		return $this->formatPrice($total, $currency);
+	}
+
+	/**
+	 * Format price for display with sortable data attribute
+	 * Format: € 2.345,– or € 2.345,60
+	 */
+	protected function formatPrice(int $cents, string $currency): string {
+		$euros = $cents / 100;
+		$formatted = number_format($euros, 2, ',', '.');
+
+		// Replace ,00 with ,–
+		if (str_ends_with($formatted, ',00')) {
+			$formatted = substr($formatted, 0, -2) . '–';
+		}
+
+		$symbol = ($currency === 'EUR') ? '€' : $currency;
+		return "<span data-sort='{$cents}'>{$symbol} {$formatted}</span>";
 	}
 
 	/**
@@ -818,7 +835,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 							$row[] = $data['quantity'];
 							break;
 						case 'revenue':
-							$row[] = number_format($data['revenue'] / 100, 2) . ' ' . $data['currency'];
+							$row[] = $this->formatPrice($data['revenue'], $data['currency']);
 							break;
 						case 'last_purchase':
 							$row[] = $data['last_purchase'] ? date('Y-m-d', $data['last_purchase']) : '-';
