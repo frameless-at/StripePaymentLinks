@@ -651,7 +651,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 		}
 		$out .= "</ul>";
 
-		$out .= "<a href='{$configUrl}' class='ui-button ui-state-default ui-priority-secondary' style='font-size:12px'><i class='fa fa-cog'></i> Columns</a>";
+		$out .= "<a href='{$configUrl}&collapse_info=1' class='ui-link'><i class='fa fa-cog'></i> Columns</a>";
 
 		$out .= "</div>";
 
