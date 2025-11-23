@@ -63,10 +63,24 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 	 */
 	public static function getDefaults(): array {
 		return [
-			'adminColumns' => ['user_email', 'purchase_date', 'product_titles', 'amount_total', 'payment_status'],
+			'purchasesColumns' => ['user_email', 'purchase_date', 'product_titles', 'amount_total', 'payment_status'],
+			'productsColumns' => ['name', 'purchases', 'quantity', 'revenue', 'last_purchase'],
 			'itemsPerPage' => 25,
 		];
 	}
+
+	/**
+	 * Available columns for Products tab
+	 */
+	protected array $availableProductsColumns = [
+		'name'          => ['label' => 'Product Name'],
+		'purchases'     => ['label' => 'Purchases'],
+		'quantity'      => ['label' => 'Quantity'],
+		'revenue'       => ['label' => 'Revenue'],
+		'last_purchase' => ['label' => 'Last Purchase'],
+		'page_id'       => ['label' => 'Page ID'],
+		'stripe_id'     => ['label' => 'Stripe Product ID'],
+	];
 
 	/**
 	 * Module configuration
@@ -78,27 +92,57 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 		$defaults = self::getDefaults();
 		$data = array_merge($defaults, $data);
 
-		// Column selection
+		// Purchases Tab
+		$tab1 = $modules->get('InputfieldFieldset');
+		$tab1->label = 'Purchases';
+		$tab1->collapsed = Inputfield::collapsedNo;
+
 		$f = $modules->get('InputfieldAsmSelect');
-		$f->name = 'adminColumns';
-		$f->label = 'Columns to display';
+		$f->name = 'purchasesColumns';
+		$f->label = 'Columns for Purchases tab';
 		$f->description = 'Select and order the columns to show in the purchases table.';
 
 		$instance = new self();
 		foreach ($instance->availableColumns as $key => $col) {
 			$f->addOption($key, $col['label']);
 		}
-		$f->value = $data['adminColumns'];
-		$wrapper->add($f);
+		$f->value = $data['purchasesColumns'] ?? $data['adminColumns'] ?? [];
+		$tab1->add($f);
 
-		// Items per page
+		$wrapper->add($tab1);
+
+		// Products Tab
+		$tab2 = $modules->get('InputfieldFieldset');
+		$tab2->label = 'Products';
+		$tab2->collapsed = Inputfield::collapsedNo;
+
+		$f = $modules->get('InputfieldAsmSelect');
+		$f->name = 'productsColumns';
+		$f->label = 'Columns for Products tab';
+		$f->description = 'Select and order the columns to show in the products table.';
+
+		foreach ($instance->availableProductsColumns as $key => $col) {
+			$f->addOption($key, $col['label']);
+		}
+		$f->value = $data['productsColumns'] ?? [];
+		$tab2->add($f);
+
+		$wrapper->add($tab2);
+
+		// General settings
+		$tab3 = $modules->get('InputfieldFieldset');
+		$tab3->label = 'General';
+		$tab3->collapsed = Inputfield::collapsedNo;
+
 		$f = $modules->get('InputfieldInteger');
 		$f->name = 'itemsPerPage';
 		$f->label = 'Items per page';
 		$f->value = $data['itemsPerPage'];
 		$f->min = 10;
 		$f->max = 500;
-		$wrapper->add($f);
+		$tab3->add($f);
+
+		$wrapper->add($tab3);
 
 		return $wrapper;
 	}
@@ -118,7 +162,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 		$sanitizer = $this->wire('sanitizer');
 
 		// Get config
-		$columns = $this->adminColumns ?: self::getDefaults()['adminColumns'];
+		$columns = $this->purchasesColumns ?: self::getDefaults()['purchasesColumns'];
 		$perPage = (int)($this->itemsPerPage ?: 25);
 
 		// Filters
@@ -200,7 +244,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 		$users = $this->wire('users');
 		$sanitizer = $this->wire('sanitizer');
 
-		$columns = $this->adminColumns ?: self::getDefaults()['adminColumns'];
+		$columns = $this->purchasesColumns ?: self::getDefaults()['purchasesColumns'];
 
 		// Filters
 		$filterEmail = $sanitizer->email($input->get('filter_email'));
@@ -736,6 +780,9 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 		// Sort by count descending
 		uasort($productData, fn($a, $b) => $b['count'] <=> $a['count']);
 
+		// Get configured columns
+		$columns = $this->productsColumns ?: self::getDefaults()['productsColumns'];
+
 		// Render table
 		if (empty($productData)) {
 			$out .= "<p>No products found.</p>";
@@ -743,25 +790,50 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 			$table = $this->modules->get('MarkupAdminDataTable');
 			$table->setEncodeEntities(false);
 			$table->setSortable(true);
-			$table->headerRow(['Product', 'Purchases', 'Quantity', 'Revenue', 'Last Purchase']);
 
+			// Dynamic header
+			$headers = [];
+			foreach ($columns as $col) {
+				$headers[] = $this->availableProductsColumns[$col]['label'] ?? $col;
+			}
+			$table->headerRow($headers);
+
+			// Dynamic rows
 			foreach ($productData as $data) {
-				$name = htmlspecialchars($data['name']);
-				if ($data['page_id']) {
-					$editUrl = $this->wire('config')->urls->admin . "page/edit/?id={$data['page_id']}";
-					$name = "<a href='{$editUrl}'>{$name}</a>";
+				$row = [];
+				foreach ($columns as $col) {
+					switch ($col) {
+						case 'name':
+							$name = htmlspecialchars($data['name']);
+							if ($data['page_id']) {
+								$editUrl = $this->wire('config')->urls->admin . "page/edit/?id={$data['page_id']}";
+								$name = "<a href='{$editUrl}'>{$name}</a>";
+							}
+							$row[] = $name;
+							break;
+						case 'purchases':
+							$row[] = $data['count'];
+							break;
+						case 'quantity':
+							$row[] = $data['quantity'];
+							break;
+						case 'revenue':
+							$row[] = number_format($data['revenue'] / 100, 2) . ' ' . $data['currency'];
+							break;
+						case 'last_purchase':
+							$row[] = $data['last_purchase'] ? date('Y-m-d', $data['last_purchase']) : '-';
+							break;
+						case 'page_id':
+							$row[] = $data['page_id'] ?: '-';
+							break;
+						case 'stripe_id':
+							$row[] = $data['stripe_id'] ?: '-';
+							break;
+						default:
+							$row[] = '';
+					}
 				}
-
-				$revenue = number_format($data['revenue'] / 100, 2) . ' ' . $data['currency'];
-				$lastPurchase = $data['last_purchase'] ? date('Y-m-d', $data['last_purchase']) : '-';
-
-				$table->row([
-					$name,
-					$data['count'],
-					$data['quantity'],
-					$revenue,
-					$lastPurchase
-				]);
+				$table->row($row);
 			}
 
 			$out .= "<div style='margin-top:-1px'>" . $table->render() . "</div>";
