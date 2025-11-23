@@ -806,7 +806,7 @@ public function processCheckout(Page $currentPage): void {
 	 
 		 // ---- compute subscription product scope keys (ONLY recurring) ----
 		 $subscriptionScopeKeys = [];
-		 if ($sub && isset($sub->items->data) && is_array($sub->items->data)) {
+		 if ($sub && !empty($sub->items->data)) {
 		   foreach ($sub->items->data as $si) {
 			 $stripeProd = (string)($si->price->product ?? '');
 			 if ($stripeProd !== '') {
@@ -818,6 +818,8 @@ public function processCheckout(Page $currentPage): void {
 		   }
 		 }
 		 $subscriptionScopeKeys = array_values(array_unique($subscriptionScopeKeys));
+
+		 $this->wire('log')->save(self::LOG_PL, '[DEBUG] subId=' . ($subId ?? 'null') . ' effectiveEnd=' . ($effectiveEnd ?? 'null') . ' scopeKeys=' . json_encode($subscriptionScopeKeys));
 
 		 // ---- persist repeater item ----
 		 if ($buyer->hasField('spl_purchases')) {
