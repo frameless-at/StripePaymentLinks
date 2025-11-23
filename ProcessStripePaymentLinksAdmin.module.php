@@ -634,19 +634,26 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 	 */
 	protected function renderTabs(string $active): string {
 		$baseUrl = $this->page->url;
+		$configUrl = $this->wire('config')->urls->admin . 'module/edit/?name=ProcessStripePaymentLinksAdmin';
 
 		$tabs = [
 			'purchases' => ['url' => $baseUrl, 'label' => 'Purchases'],
 			'products' => ['url' => $baseUrl . 'products/', 'label' => 'Products'],
 		];
 
-		$out = "<ul class='WireTabs uk-tab' role='tablist' style='margin-bottom:20px'>";
+		$out = "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:20px'>";
+
+		$out .= "<ul class='WireTabs uk-tab' role='tablist' style='margin:0'>";
 		foreach ($tabs as $key => $tab) {
 			$liClass = ($key === $active) ? 'uk-active' : '';
 			$aClass = ($key === $active) ? 'pw-active' : '';
 			$out .= "<li class='{$liClass}' role='presentation'><a href='{$tab['url']}' class='{$aClass}' role='tab'>{$tab['label']}</a></li>";
 		}
 		$out .= "</ul>";
+
+		$out .= "<a href='{$configUrl}' class='ui-button ui-state-default ui-priority-secondary' style='font-size:12px'><i class='fa fa-cog'></i> Columns</a>";
+
+		$out .= "</div>";
 
 		return $out;
 	}
