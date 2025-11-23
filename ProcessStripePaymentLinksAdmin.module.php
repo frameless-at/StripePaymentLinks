@@ -504,12 +504,13 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 	}
 
 	/**
-	 * Format price for display with sortable data attribute
-	 * Format: € 2.345,– or € 2.345,60
+	 * Format price for display with proper sorting
+	 * Format: € 2345,60 or € 2345,– (no thousands separator)
 	 */
 	protected function formatPrice(int $cents, string $currency): string {
 		$euros = $cents / 100;
-		$formatted = number_format($euros, 2, ',', '.');
+		// No thousands separator, comma as decimal
+		$formatted = number_format($euros, 2, ',', '');
 
 		// Replace ,00 with ,–
 		if (str_ends_with($formatted, ',00')) {
@@ -517,7 +518,10 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 		}
 
 		$symbol = ($currency === 'EUR') ? '€' : $currency;
-		return "<span data-sort='{$cents}'>{$symbol} {$formatted}</span>";
+
+		// Hidden sortable prefix (12 digits with leading zeros)
+		$sortKey = str_pad($cents, 12, '0', STR_PAD_LEFT);
+		return "<span style='display:none'>{$sortKey}</span>{$symbol} {$formatted}";
 	}
 
 	/**
