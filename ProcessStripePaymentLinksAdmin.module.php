@@ -534,7 +534,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 		$map = (array)$item->meta('period_end_map');
 
 		if (empty($map)) {
-			return 'lifetime';
+			return '–';
 		}
 
 		$statuses = [];
@@ -566,7 +566,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 		}
 
 		if (empty($statuses)) {
-			return 'lifetime';
+			return '–';
 		}
 
 		$statuses = array_unique($statuses);
@@ -640,7 +640,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 			'products' => ['url' => $baseUrl . 'products/', 'label' => 'Products'],
 		];
 
-		$out = "<ul class='WireTabs uk-tab' role='tablist' style='margin-bottom:0'>";
+		$out = "<ul class='WireTabs uk-tab' role='tablist' style='margin-bottom:20px'>";
 		foreach ($tabs as $key => $tab) {
 			$liClass = ($key === $active) ? 'uk-active' : '';
 			$aClass = ($key === $active) ? 'pw-active' : '';
