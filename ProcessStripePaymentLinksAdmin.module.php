@@ -224,14 +224,8 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 		// Render table
 		$out .= $this->renderTable($paginated, $columns);
 
-		// Pagination links
-		if ($total > $perPage) {
-			$out .= $this->renderPagination($total, $perPage, $page);
-		}
-
-		// Export link
-		$exportUrl = $this->page->url . 'export/?' . http_build_query($input->get->getArray());
-		$out .= "<p style='margin-top:1em;'><a href='{$exportUrl}' class='ui-button'><i class='fa fa-download'></i> Export CSV</a></p>";
+		// Pagination and Export in same row
+		$out .= $this->renderPaginationRow($total, $perPage, $page);
 
 		return $out;
 	}
@@ -680,26 +674,41 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 	}
 
 	/**
-	 * Render pagination
+	 * Render pagination row with pager and export button
 	 */
-	protected function renderPagination(int $total, int $perPage, int $currentPage): string {
-		$totalPages = ceil($total / $perPage);
+	protected function renderPaginationRow(int $total, int $perPage, int $currentPage): string {
 		$input = $this->wire('input');
 
-		$out = "<div style='margin-top:1em;'>";
-		$out .= "<span>Page {$currentPage} of {$totalPages} ({$total} purchases)</span> ";
+		$out = "<div style='display:flex;justify-content:space-between;align-items:center;margin-top:1em;'>";
 
-		$baseParams = $input->get->getArray();
+		// Left side: Pagination
+		if ($total > $perPage) {
+			// Create a PaginatedArray for MarkupPagerNav
+			$pager = new PaginatedArray();
+			$pager->setTotal($total);
+			$pager->setLimit($perPage);
+			$pager->setStart(($currentPage - 1) * $perPage);
 
-		if ($currentPage > 1) {
-			$baseParams['pg'] = $currentPage - 1;
-			$out .= "<a href='?" . http_build_query($baseParams) . "' class='ui-button'>&laquo; Prev</a> ";
+			// Build base URL with existing filters
+			$baseParams = $input->get->getArray();
+			unset($baseParams['pg']);
+			$baseUrl = './' . (!empty($baseParams) ? '?' . http_build_query($baseParams) . '&' : '?');
+
+			/** @var MarkupPagerNav $pagerNav */
+			$pagerNav = $this->modules->get('MarkupPagerNav');
+			$out .= $pagerNav->render($pager, [
+				'baseUrl' => $baseUrl,
+				'pageNum' => $currentPage,
+				'queryString' => '',
+			]);
+		} else {
+			$out .= "<div></div>";
 		}
 
-		if ($currentPage < $totalPages) {
-			$baseParams['pg'] = $currentPage + 1;
-			$out .= "<a href='?" . http_build_query($baseParams) . "' class='ui-button'>Next &raquo;</a>";
-		}
+		// Right side: Export button
+		$exportParams = $input->get->getArray();
+		$exportUrl = $this->page->url . 'export/' . (!empty($exportParams) ? '?' . http_build_query($exportParams) : '');
+		$out .= "<a href='{$exportUrl}' class='ui-button'><i class='fa fa-download'></i> Export CSV</a>";
 
 		$out .= "</div>";
 
