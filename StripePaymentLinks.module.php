@@ -34,7 +34,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	public static function getModuleInfo(): array {
 		return [
 			'title'       => 'StripePaymentLinks',
-			'version'     => '1.0.18', 
+			'version'     => '1.0.20',
 			'summary'     => 'Stripe payment-link redirects, user/purchases, magic link, mails, modals.',
 			'author'      => 'frameless Media',
 			'autoload'    => true,
@@ -238,8 +238,59 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		$this->ensureFields();
 		$this->ensureProductFields();
 		$this->ensureCustomerRoleExists();
+		$this->installAdminModule();
 	}
-	
+
+	/**
+	 * Install the admin Process module for viewing purchases.
+	 *
+	 * @return void
+	 */
+	protected function installAdminModule(): void {
+		$modules = $this->wire('modules');
+
+		// Register the module path
+		$adminModulePath = __DIR__ . '/ProcessStripePaymentLinksAdmin.module.php';
+		if (!is_file($adminModulePath)) {
+			$this->wire('log')->save(self::LOG_PL, 'Admin module file not found: ' . $adminModulePath);
+			return;
+		}
+
+		try {
+			// Add the module file to ProcessWire's module registry
+			require_once $adminModulePath;
+
+			// Refresh modules cache to detect the new module
+			$modules->refresh();
+
+			// Install the admin module
+			if (!$modules->isInstalled('ProcessStripePaymentLinksAdmin')) {
+				$modules->install('ProcessStripePaymentLinksAdmin');
+				$this->wire('log')->save(self::LOG_PL, 'Installed ProcessStripePaymentLinksAdmin module.');
+			}
+		} catch (\Throwable $e) {
+			$this->wire('log')->save(self::LOG_PL, 'Error installing admin module: ' . $e->getMessage());
+		}
+	}
+
+	/**
+	 * Uninstall the admin Process module.
+	 *
+	 * @return void
+	 */
+	protected function uninstallAdminModule(): void {
+		$modules = $this->wire('modules');
+
+		try {
+			if ($modules->isInstalled('ProcessStripePaymentLinksAdmin')) {
+				$modules->uninstall('ProcessStripePaymentLinksAdmin');
+				$this->wire('log')->save(self::LOG_PL, 'Uninstalled ProcessStripePaymentLinksAdmin module.');
+			}
+		} catch (\Throwable $e) {
+			$this->wire('log')->save(self::LOG_PL, 'Error uninstalling admin module: ' . $e->getMessage());
+		}
+	}
+
 	/**
 	 * Upgrades the module, re-ensuring required fields and roles.
 	 *
@@ -251,6 +302,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		$this->ensureFields();
 		$this->ensureProductFields();
 		$this->ensureCustomerRoleExists();
+		$this->installAdminModule();
 	}
 	
 	/**
@@ -259,6 +311,9 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	 * @return void
 	 */
 	public function ___uninstall(): void {
+		// Uninstall admin module first
+		$this->uninstallAdminModule();
+
 		$fields     = $this->wire('fields');
 		$templates  = $this->wire('templates');
 		$roles      = $this->wire('roles');
