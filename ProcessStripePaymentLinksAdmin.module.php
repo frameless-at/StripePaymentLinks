@@ -59,7 +59,6 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 
 		// Renewals
 		'renewal_count'     => ['label' => 'Renewal Count', 'type' => 'computed', 'compute' => 'computeRenewalCount'],
-		'renewal_total'     => ['label' => 'Renewal Total', 'type' => 'computed', 'compute' => 'computeRenewalTotal'],
 		'last_renewal'      => ['label' => 'Last Renewal', 'type' => 'computed', 'compute' => 'computeLastRenewal'],
 	];
 
@@ -84,7 +83,6 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 		'revenue'         => ['label' => 'Revenue'],
 		'last_purchase'   => ['label' => 'Last Purchase'],
 		'renewals'        => ['label' => 'Renewals'],
-		'renewal_revenue' => ['label' => 'Renewal Revenue'],
 		'page_id'         => ['label' => 'Page ID'],
 		'stripe_id'       => ['label' => 'Stripe Product ID'],
 	];
@@ -410,6 +408,13 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 						$total += (int)($li['amount_total'] ?? 0);
 						if (!$currency) $currency = strtoupper($li['currency'] ?? $session['currency'] ?? '');
 					}
+					// Add renewal amounts
+					$renewals = (array)$purchase['item']->meta('renewals');
+					foreach ($renewals as $scopeRenewals) {
+						foreach ((array)$scopeRenewals as $renewal) {
+							$total += (int)($renewal['amount'] ?? 0);
+						}
+					}
 					$row[] = $total > 0 ? $this->formatPrice($total, $currency) : '';
 				} else {
 					$row[] = $this->getColumnValue($purchase['user'], $purchase['item'], $col);
@@ -687,24 +692,6 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 	}
 
 	/**
-	 * Compute renewal total amount
-	 */
-	protected function computeRenewalTotal(User $user, Page $item): string {
-		$renewals = (array)$item->meta('renewals');
-		$session = (array)$item->meta('stripe_session');
-		$currency = strtoupper($session['currency'] ?? 'EUR');
-
-		$total = 0;
-		foreach ($renewals as $scopeRenewals) {
-			foreach ((array)$scopeRenewals as $renewal) {
-				$total += (int)($renewal['amount'] ?? 0);
-			}
-		}
-
-		return $total > 0 ? $this->formatPrice($total, $currency) : '';
-	}
-
-	/**
 	 * Compute last renewal date
 	 */
 	protected function computeLastRenewal(User $user, Page $item): string {
@@ -899,7 +886,6 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 							'currency' => $currency,
 							'last_purchase' => 0,
 							'renewals' => 0,
-							'renewal_revenue' => 0,
 						];
 					}
 
@@ -911,7 +897,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 					}
 				}
 
-				// Aggregate renewals
+				// Aggregate renewals - add to revenue
 				$renewals = (array)$item->meta('renewals');
 				foreach ($renewals as $scopeKey => $scopeRenewals) {
 					// Match scope key to product key
@@ -925,7 +911,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 					if ($renewalKey && isset($productData[$renewalKey])) {
 						foreach ((array)$scopeRenewals as $renewal) {
 							$productData[$renewalKey]['renewals']++;
-							$productData[$renewalKey]['renewal_revenue'] += (int)($renewal['amount'] ?? 0);
+							$productData[$renewalKey]['revenue'] += (int)($renewal['amount'] ?? 0);
 						}
 					}
 				}
@@ -987,9 +973,6 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 							break;
 						case 'renewals':
 							$row[] = $data['renewals'] ?: '-';
-							break;
-						case 'renewal_revenue':
-							$row[] = $data['renewal_revenue'] ? $this->formatPrice($data['renewal_revenue'], $data['currency']) : '-';
 							break;
 						case 'page_id':
 							$row[] = $data['page_id'] ?: '-';
@@ -1068,7 +1051,6 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 							'currency' => $currency,
 							'last_purchase' => 0,
 							'renewals' => 0,
-							'renewal_revenue' => 0,
 						];
 					}
 
@@ -1080,7 +1062,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 					}
 				}
 
-				// Aggregate renewals
+				// Aggregate renewals - add to revenue
 				$renewals = (array)$item->meta('renewals');
 				foreach ($renewals as $scopeKey => $scopeRenewals) {
 					$renewalKey = null;
@@ -1093,7 +1075,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 					if ($renewalKey && isset($productData[$renewalKey])) {
 						foreach ((array)$scopeRenewals as $renewal) {
 							$productData[$renewalKey]['renewals']++;
-							$productData[$renewalKey]['renewal_revenue'] += (int)($renewal['amount'] ?? 0);
+							$productData[$renewalKey]['revenue'] += (int)($renewal['amount'] ?? 0);
 						}
 					}
 				}
@@ -1141,14 +1123,6 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 						break;
 					case 'renewals':
 						$row[] = $data['renewals'] ?: '';
-						break;
-					case 'renewal_revenue':
-						if ($data['renewal_revenue']) {
-							$symbol = ($data['currency'] === 'EUR') ? '€' : $data['currency'];
-							$row[] = $symbol . ' ' . number_format($data['renewal_revenue'] / 100, 2, ',', '');
-						} else {
-							$row[] = '';
-						}
 						break;
 					case 'page_id':
 						$row[] = $data['page_id'] ?: '';
