@@ -769,9 +769,19 @@ public function processCheckout(Page $currentPage): void {
 		 $productIds = array_values(array_unique(array_map('intval', $productIds)));
 	 
 		 // ---- subscription state + effective end ----
-		 $sub    = (is_object($checkoutSession->subscription ?? null)) ? $checkoutSession->subscription : null;
-		 if (!$sub && is_string($checkoutSession->subscription ?? null) && $checkoutSession->subscription !== '') {
-		   try { $sub = $stripe->subscriptions->retrieve($checkoutSession->subscription, ['expand' => ['items']]); } catch (\Throwable $e) {}
+		 $sub = null;
+		 $subId = null;
+
+		 // Get subscription ID from checkout session
+		 if (is_object($checkoutSession->subscription ?? null)) {
+		   $subId = (string)($checkoutSession->subscription->id ?? '');
+		 } elseif (is_string($checkoutSession->subscription ?? null) && $checkoutSession->subscription !== '') {
+		   $subId = $checkoutSession->subscription;
+		 }
+
+		 // Always retrieve subscription with items expanded
+		 if ($subId) {
+		   try { $sub = $stripe->subscriptions->retrieve($subId, ['expand' => ['items']]); } catch (\Throwable $e) {}
 		 }
 	 
 		 $canceled = $sub ? ((string)($sub->status ?? '') === 'canceled') : null;
