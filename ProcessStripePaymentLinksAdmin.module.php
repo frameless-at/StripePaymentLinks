@@ -401,7 +401,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 			$row = [];
 			foreach ($columns as $col) {
 				$value = $this->getColumnValue($purchase['user'], $purchase['item'], $col);
-				$row[] = htmlspecialchars((string)$value);
+				$row[] = $value;
 			}
 			$table->row($row);
 		}
