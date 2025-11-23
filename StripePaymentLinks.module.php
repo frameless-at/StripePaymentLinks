@@ -722,7 +722,7 @@ public function processCheckout(Page $currentPage): void {
 		   }
 		   if (is_string($sessionObj->subscription ?? null) && $sessionObj->subscription !== '') {
 			 try {
-			   $sub = $client->subscriptions->retrieve($sessionObj->subscription, []);
+			   $sub = $client->subscriptions->retrieve($sessionObj->subscription, ['expand' => ['items']]);
 			   if (!empty($sub->current_period_end)) return (int)$sub->current_period_end;
 			   if (!empty($sub->items->data) && is_array($sub->items->data)) {
 				 foreach ($sub->items->data as $si) {
@@ -771,7 +771,7 @@ public function processCheckout(Page $currentPage): void {
 		 // ---- subscription state + effective end ----
 		 $sub    = (is_object($checkoutSession->subscription ?? null)) ? $checkoutSession->subscription : null;
 		 if (!$sub && is_string($checkoutSession->subscription ?? null) && $checkoutSession->subscription !== '') {
-		   try { $sub = $stripe->subscriptions->retrieve($checkoutSession->subscription, []); } catch (\Throwable $e) {}
+		   try { $sub = $stripe->subscriptions->retrieve($checkoutSession->subscription, ['expand' => ['items']]); } catch (\Throwable $e) {}
 		 }
 	 
 		 $canceled = $sub ? ((string)($sub->status ?? '') === 'canceled') : null;
