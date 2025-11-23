@@ -673,7 +673,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 	protected function renderPaginationRow(int $total, int $perPage, int $currentPage, string $exportAction = 'export'): string {
 		$input = $this->wire('input');
 
-		$out = "<div style='display:flex;justify-content:space-between;align-items:center;margin-top:1em'>";
+		$out = "<div style='display:flex;justify-content:space-between;align-items:center;'>";
 
 		// Left side: Pagination
 		if ($total > $perPage) {
@@ -681,7 +681,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 			$baseParams = $input->get->getArray();
 			unset($baseParams['pg']);
 
-			$out .= "<ul class='uk-pagination' style='margin-left:0'>";
+			$out .= "<ul class='uk-pagination' style='margin-left:0;'>";
 
 			// Previous
 			if ($currentPage > 1) {
@@ -745,7 +745,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 		$exportParams = $input->get->getArray();
 		unset($exportParams['pg']);
 		$exportUrl = $this->page->url . $exportAction . '/' . (!empty($exportParams) ? '?' . http_build_query($exportParams) : '');
-		$out .= "<a href='{$exportUrl}' class='ui-button ui-priority-secondary'><i class='fa fa-download'></i> Export CSV</a>";
+		$out .= "<a href='{$exportUrl}' class='uk-button uk-button uk-button-secondary'><i class='fa fa-download'></i> Export CSV</a>";
 
 		$out .= "</div>";
 
