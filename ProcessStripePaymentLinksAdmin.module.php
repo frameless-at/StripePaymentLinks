@@ -686,15 +686,13 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 			$baseParams = $input->get->getArray();
 			unset($baseParams['pg']);
 
-			$out .= "<ul class='MarkupPagerNav' style='display:flex;list-style:none;margin:0;padding:0;gap:2px;'>";
+			$out .= "<ul class='uk-pagination' style='margin-left:0'>";
 
 			// Previous
 			if ($currentPage > 1) {
 				$baseParams['pg'] = $currentPage - 1;
 				$url = './?' . http_build_query($baseParams);
-				$out .= "<li class='MarkupPagerNavPrevious'><a href='{$url}'>&lsaquo;</a></li>";
-			} else {
-				$out .= "<li class='MarkupPagerNavPrevious MarkupPagerNavDisabled'><span>&lsaquo;</span></li>";
+				$out .= "<li aria-label='Vorherige Seite' class='MarkupPagerNavPrevious'><a href='{$url}'><span><i class='fa fa-angle-left'></i></span></a></li>";
 			}
 
 			// Page numbers
@@ -706,7 +704,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 			if ($start > 1) {
 				$baseParams['pg'] = 1;
 				$url = './?' . http_build_query($baseParams);
-				$out .= "<li><a href='{$url}'>1</a></li>";
+				$out .= "<li aria-label='Seite 1' class='MarkupPagerNavFirst'><a href='{$url}'><span>1</span></a></li>";
 				if ($start > 2) {
 					$out .= "<li class='MarkupPagerNavSeparator'><span>&hellip;</span></li>";
 				}
@@ -714,13 +712,16 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 
 			// Middle pages
 			for ($i = $start; $i <= $end; $i++) {
-				if ($i == $currentPage) {
-					$out .= "<li class='MarkupPagerNavOn'><span>{$i}</span></li>";
-				} else {
-					$baseParams['pg'] = $i;
-					$url = './?' . http_build_query($baseParams);
-					$out .= "<li><a href='{$url}'>{$i}</a></li>";
-				}
+				$classes = [];
+				if ($i == $currentPage) $classes[] = 'uk-active MarkupPagerNavOn';
+				if ($i == 1) $classes[] = 'MarkupPagerNavFirstNum';
+				if ($i == $totalPages) $classes[] = 'MarkupPagerNavLastNum';
+				$classStr = implode(' ', $classes);
+				$aria = ($i == $currentPage) ? " aria-current='true'" : '';
+
+				$baseParams['pg'] = $i;
+				$url = './?' . http_build_query($baseParams);
+				$out .= "<li aria-label='Seite {$i}'" . ($classStr ? " class='{$classStr}'" : '') . "{$aria}><a href='{$url}'><span>{$i}</span></a></li>";
 			}
 
 			// Last page
@@ -730,16 +731,14 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 				}
 				$baseParams['pg'] = $totalPages;
 				$url = './?' . http_build_query($baseParams);
-				$out .= "<li class='MarkupPagerNavLast'><a href='{$url}'>{$totalPages}</a></li>";
+				$out .= "<li aria-label='Seite {$totalPages}' class='MarkupPagerNavLast'><a href='{$url}'><span>{$totalPages}</span></a></li>";
 			}
 
 			// Next
 			if ($currentPage < $totalPages) {
 				$baseParams['pg'] = $currentPage + 1;
 				$url = './?' . http_build_query($baseParams);
-				$out .= "<li class='MarkupPagerNavNext'><a href='{$url}'>&rsaquo;</a></li>";
-			} else {
-				$out .= "<li class='MarkupPagerNavNext MarkupPagerNavDisabled'><span>&rsaquo;</span></li>";
+				$out .= "<li aria-label='Nächste Seite' class='MarkupPagerNavNext'><a href='{$url}'><span><i class='fa fa-angle-right'></i></span></a></li>";
 			}
 
 			$out .= "</ul>";
