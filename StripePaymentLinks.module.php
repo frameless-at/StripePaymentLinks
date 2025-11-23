@@ -886,7 +886,7 @@ public function processCheckout(Page $currentPage): void {
 			 'unmapped'       => $unmapped ? implode(', ', $unmapped) : '-',
 			 'newUser'        => $isNew ? 'yes' : 'no',
 			 'subPeriodEnd'   => $subscriptionPeriodEnd ?: '-',
-			 'subProductIds'  => $subscriptionPids ?: [],
+			 'subScopeKeys'   => $subscriptionScopeKeys ?: [],
 		   ], JSON_UNESCAPED_SLASHES)
 		 );
 	 
