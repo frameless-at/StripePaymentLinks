@@ -682,24 +682,67 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 
 		// Left side: Pagination
 		if ($total > $perPage) {
-			// Create a PaginatedArray for MarkupPagerNav
-			$pager = new PaginatedArray();
-			$pager->setTotal($total);
-			$pager->setLimit($perPage);
-			$pager->setStart(($currentPage - 1) * $perPage);
-
-			// Build base URL with existing filters
+			$totalPages = (int)ceil($total / $perPage);
 			$baseParams = $input->get->getArray();
 			unset($baseParams['pg']);
-			$baseUrl = './' . (!empty($baseParams) ? '?' . http_build_query($baseParams) . '&' : '?');
 
-			/** @var MarkupPagerNav $pagerNav */
-			$pagerNav = $this->modules->get('MarkupPagerNav');
-			$out .= $pagerNav->render($pager, [
-				'baseUrl' => $baseUrl,
-				'pageNum' => $currentPage,
-				'queryString' => '',
-			]);
+			$out .= "<ul class='MarkupPagerNav' style='display:flex;list-style:none;margin:0;padding:0;gap:2px;'>";
+
+			// Previous
+			if ($currentPage > 1) {
+				$baseParams['pg'] = $currentPage - 1;
+				$url = './?' . http_build_query($baseParams);
+				$out .= "<li class='MarkupPagerNavPrevious'><a href='{$url}'>&lsaquo;</a></li>";
+			} else {
+				$out .= "<li class='MarkupPagerNavPrevious MarkupPagerNavDisabled'><span>&lsaquo;</span></li>";
+			}
+
+			// Page numbers
+			$range = 2;
+			$start = max(1, $currentPage - $range);
+			$end = min($totalPages, $currentPage + $range);
+
+			// First page
+			if ($start > 1) {
+				$baseParams['pg'] = 1;
+				$url = './?' . http_build_query($baseParams);
+				$out .= "<li><a href='{$url}'>1</a></li>";
+				if ($start > 2) {
+					$out .= "<li class='MarkupPagerNavSeparator'><span>&hellip;</span></li>";
+				}
+			}
+
+			// Middle pages
+			for ($i = $start; $i <= $end; $i++) {
+				if ($i == $currentPage) {
+					$out .= "<li class='MarkupPagerNavOn'><span>{$i}</span></li>";
+				} else {
+					$baseParams['pg'] = $i;
+					$url = './?' . http_build_query($baseParams);
+					$out .= "<li><a href='{$url}'>{$i}</a></li>";
+				}
+			}
+
+			// Last page
+			if ($end < $totalPages) {
+				if ($end < $totalPages - 1) {
+					$out .= "<li class='MarkupPagerNavSeparator'><span>&hellip;</span></li>";
+				}
+				$baseParams['pg'] = $totalPages;
+				$url = './?' . http_build_query($baseParams);
+				$out .= "<li class='MarkupPagerNavLast'><a href='{$url}'>{$totalPages}</a></li>";
+			}
+
+			// Next
+			if ($currentPage < $totalPages) {
+				$baseParams['pg'] = $currentPage + 1;
+				$url = './?' . http_build_query($baseParams);
+				$out .= "<li class='MarkupPagerNavNext'><a href='{$url}'>&rsaquo;</a></li>";
+			} else {
+				$out .= "<li class='MarkupPagerNavNext MarkupPagerNavDisabled'><span>&rsaquo;</span></li>";
+			}
+
+			$out .= "</ul>";
 		} else {
 			$out .= "<div></div>";
 		}
