@@ -509,24 +509,19 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 	}
 
 	/**
-	 * Format price for display with proper sorting
-	 * Format: € 2345,60 or € 2345,– (no thousands separator)
+	 * Format price for display
+	 * Format: € 3409,00 (EUR) or $ 3409.00 (USD) or CURRENCY 3409.00
 	 */
 	protected function formatPrice(int $cents, string $currency): string {
-		$euros = $cents / 100;
-		// No thousands separator, comma as decimal
-		$formatted = number_format($euros, 2, ',', '');
+		$amount = $cents / 100;
 
-		// Replace ,00 with ,–
-		if (str_ends_with($formatted, ',00')) {
-			$formatted = substr($formatted, 0, -2) . '–';
+		if ($currency === 'EUR') {
+			return '€ ' . number_format($amount, 2, ',', '');
+		} elseif ($currency === 'USD') {
+			return '$ ' . number_format($amount, 2, '.', '');
+		} else {
+			return $currency . ' ' . number_format($amount, 2, '.', '');
 		}
-
-		$symbol = ($currency === 'EUR') ? '€' : $currency;
-
-		// Hidden sortable prefix (12 digits with leading zeros)
-		$sortKey = str_pad($cents, 12, '0', STR_PAD_LEFT);
-		return "<span style='display:none'>{$sortKey}</span>{$symbol} {$formatted}";
 	}
 
 	/**
