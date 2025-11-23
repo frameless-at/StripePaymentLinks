@@ -689,7 +689,15 @@ public function processCheckout(Page $currentPage): void {
 		 $stripe = $bundle['client'];
 
 		 // Debug: log checkout session details
-		 $this->wire('log')->save(self::LOG_PL, '[DEBUG] Checkout session mode=' . ($checkoutSession->mode ?? 'null') . ' subscription=' . json_encode($checkoutSession->subscription ?? null));
+		 $debugRecurring = [];
+		 foreach ((array)($checkoutSession->line_items->data ?? []) as $dli) {
+		   $priceType = $dli->price->type ?? 'unknown';
+		   $recurringInterval = $dli->price->recurring->interval ?? null;
+		   if ($priceType === 'recurring' || $recurringInterval) {
+		     $debugRecurring[] = ($dli->price->product->name ?? $dli->description ?? 'item') . ' (' . ($recurringInterval ?? 'recurring') . ')';
+		   }
+		 }
+		 $this->wire('log')->save(self::LOG_PL, '[DEBUG] Checkout session id=' . $sessionId . ' mode=' . ($checkoutSession->mode ?? 'null') . ' subscription=' . json_encode($checkoutSession->subscription ?? null) . ' recurring_items=' . json_encode($debugRecurring));
 
 		 if (($checkoutSession->payment_status ?? null) !== 'paid') return;
 	 
