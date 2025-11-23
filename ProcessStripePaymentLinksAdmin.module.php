@@ -640,7 +640,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 			'products' => ['url' => $baseUrl . 'products/', 'label' => 'Products'],
 		];
 
-		$out = "<ul class='WireTabs uk-tab' role='tablist'>";
+		$out = "<ul class='WireTabs uk-tab' role='tablist' style='margin-bottom:0'>";
 		foreach ($tabs as $key => $tab) {
 			$liClass = ($key === $active) ? 'uk-active' : '';
 			$aClass = ($key === $active) ? 'pw-active' : '';
@@ -757,8 +757,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 				]);
 			}
 
-			$out .= "<style>.spl-no-margin .pw-table-responsive{margin-top:0}</style>";
-			$out .= "<div class='spl-no-margin'>" . $table->render() . "</div>";
+			$out .= "<div style='margin-top:-1px'>" . $table->render() . "</div>";
 		}
 
 		return $out;
