@@ -675,10 +675,10 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 	/**
 	 * Render pagination row with pager and export button
 	 */
-	protected function renderPaginationRow(int $total, int $perPage, int $currentPage): string {
+	protected function renderPaginationRow(int $total, int $perPage, int $currentPage, string $exportAction = 'export'): string {
 		$input = $this->wire('input');
 
-		$out = "<div style='display:flex;justify-content:space-between;align-items:center;margin-top:1em;'>";
+		$out = "<div style='display:flex;justify-content:space-between;align-items:center;margin-top:1em'>";
 
 		// Left side: Pagination
 		if ($total > $perPage) {
@@ -748,8 +748,9 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 
 		// Right side: Export button
 		$exportParams = $input->get->getArray();
-		$exportUrl = $this->page->url . 'export/' . (!empty($exportParams) ? '?' . http_build_query($exportParams) : '');
-		$out .= "<a href='{$exportUrl}' class='ui-button'><i class='fa fa-download'></i> Export CSV</a>";
+		unset($exportParams['pg']);
+		$exportUrl = $this->page->url . $exportAction . '/' . (!empty($exportParams) ? '?' . http_build_query($exportParams) : '');
+		$out .= "<a href='{$exportUrl}' class='ui-button ui-priority-secondary'><i class='fa fa-download'></i> Export CSV</a>";
 
 		$out .= "</div>";
 
@@ -794,6 +795,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 
 		$out = $this->renderTabs('products');
 
+		$input = $this->wire('input');
 		$users = $this->wire('users');
 		$pages = $this->wire('pages');
 
@@ -865,6 +867,13 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 
 		// Get configured columns
 		$columns = $this->productsColumns ?: self::getDefaults()['productsColumns'];
+		$perPage = (int)($this->itemsPerPage ?: 25);
+
+		// Pagination
+		$total = count($productData);
+		$page = max(1, (int)$input->get('pg'));
+		$offset = ($page - 1) * $perPage;
+		$paginatedData = array_slice($productData, $offset, $perPage, true);
 
 		// Render table
 		if (empty($productData)) {
@@ -882,7 +891,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 			$table->headerRow($headers);
 
 			// Dynamic rows
-			foreach ($productData as $data) {
+			foreach ($paginatedData as $data) {
 				$row = [];
 				foreach ($columns as $col) {
 					switch ($col) {
@@ -922,6 +931,132 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 			$out .= "<div style='margin-top:-1px'>" . $table->render() . "</div>";
 		}
 
+		// Pagination and Export
+		$out .= $this->renderPaginationRow($total, $perPage, $page, 'exportProducts');
+
 		return $out;
+	}
+
+	/**
+	 * Export products to CSV
+	 */
+	public function ___executeExportProducts(): void {
+		$users = $this->wire('users');
+		$pages = $this->wire('pages');
+
+		// Aggregate data (same as executeProducts)
+		$productData = [];
+
+		foreach ($users->find("spl_purchases.count>0") as $user) {
+			foreach ($user->spl_purchases as $item) {
+				$session = (array)$item->meta('stripe_session');
+				$lineItems = $session['line_items']['data'] ?? [];
+				$productIds = (array)$item->meta('product_ids');
+				$purchaseDate = (int)$item->get('purchase_date');
+
+				foreach ($lineItems as $li) {
+					$stripeProductId = $li['price']['product']['id'] ?? ($li['price']['product'] ?? '');
+					if (is_array($stripeProductId)) $stripeProductId = $stripeProductId['id'] ?? '';
+
+					$productName = $li['price']['product']['name']
+						?? $li['description']
+						?? $li['price']['nickname']
+						?? 'Unknown';
+
+					$amount = (int)($li['amount_total'] ?? 0);
+					$currency = strtoupper($li['currency'] ?? $session['currency'] ?? 'EUR');
+					$quantity = (int)($li['quantity'] ?? 1);
+
+					$pageId = 0;
+					foreach ($productIds as $pid) {
+						$pid = (int)$pid;
+						if ($pid === 0) continue;
+						$p = $pages->get($pid);
+						if ($p && $p->id && $p->hasField('stripe_product_id') && $p->stripe_product_id === $stripeProductId) {
+							$pageId = $pid;
+							$productName = $p->title;
+							break;
+						}
+					}
+
+					$key = $pageId ?: ('stripe:' . $stripeProductId);
+
+					if (!isset($productData[$key])) {
+						$productData[$key] = [
+							'name' => $productName,
+							'page_id' => $pageId,
+							'stripe_id' => $stripeProductId,
+							'count' => 0,
+							'quantity' => 0,
+							'revenue' => 0,
+							'currency' => $currency,
+							'last_purchase' => 0,
+						];
+					}
+
+					$productData[$key]['count']++;
+					$productData[$key]['quantity'] += $quantity;
+					$productData[$key]['revenue'] += $amount;
+					if ($purchaseDate > $productData[$key]['last_purchase']) {
+						$productData[$key]['last_purchase'] = $purchaseDate;
+					}
+				}
+			}
+		}
+
+		uasort($productData, fn($a, $b) => $b['count'] <=> $a['count']);
+
+		$columns = $this->productsColumns ?: self::getDefaults()['productsColumns'];
+
+		// Output CSV
+		header('Content-Type: text/csv; charset=utf-8');
+		header('Content-Disposition: attachment; filename="products-' . date('Y-m-d-His') . '.csv"');
+
+		$fp = fopen('php://output', 'w');
+
+		// Header row
+		$headers = [];
+		foreach ($columns as $col) {
+			$headers[] = $this->availableProductsColumns[$col]['label'] ?? $col;
+		}
+		fputcsv($fp, $headers);
+
+		// Data rows
+		foreach ($productData as $data) {
+			$row = [];
+			foreach ($columns as $col) {
+				switch ($col) {
+					case 'name':
+						$row[] = $data['name'];
+						break;
+					case 'purchases':
+						$row[] = $data['count'];
+						break;
+					case 'quantity':
+						$row[] = $data['quantity'];
+						break;
+					case 'revenue':
+						$cents = $data['revenue'];
+						$symbol = ($data['currency'] === 'EUR') ? '€' : $data['currency'];
+						$row[] = $symbol . ' ' . number_format($cents / 100, 2, ',', '');
+						break;
+					case 'last_purchase':
+						$row[] = $data['last_purchase'] ? date('Y-m-d', $data['last_purchase']) : '';
+						break;
+					case 'page_id':
+						$row[] = $data['page_id'] ?: '';
+						break;
+					case 'stripe_id':
+						$row[] = $data['stripe_id'] ?: '';
+						break;
+					default:
+						$row[] = '';
+				}
+			}
+			fputcsv($fp, $row);
+		}
+
+		fclose($fp);
+		exit;
 	}
 }
