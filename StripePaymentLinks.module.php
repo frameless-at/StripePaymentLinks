@@ -687,7 +687,10 @@ public function processCheckout(Page $currentPage): void {
 		 $checkoutSession = $bundle['session'];
 		 /** @var \Stripe\StripeClient $stripe */
 		 $stripe = $bundle['client'];
-	 
+
+		 // Debug: log checkout session details
+		 $this->wire('log')->save(self::LOG_PL, '[DEBUG] Checkout session mode=' . ($checkoutSession->mode ?? 'null') . ' subscription=' . json_encode($checkoutSession->subscription ?? null));
+
 		 if (($checkoutSession->payment_status ?? null) !== 'paid') return;
 	 
 		 // Buyer data
