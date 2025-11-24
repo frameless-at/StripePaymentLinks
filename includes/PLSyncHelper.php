@@ -577,24 +577,36 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
                        $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] Invoice={$invoiceId} lines_count=" . count($lines) . " lines_type=" . gettype($linesObj->data ?? null));
                    }
 
-                   foreach ($lines as $line) {
+                   foreach ($lines as $idx => $line) {
+                       // Debug: dump raw line data
+                       if ($shouldDebug) {
+                           $rawData = is_object($line) ? json_encode($line) : json_encode($line);
+                           $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] Line[$idx] RAW: " . substr($rawData, 0, 800));
+                       }
+
                        $stripeProductId = '';
 
-                       // Try multiple ways to get product ID
-                       if (isset($line->price->product)) {
-                           $prod = $line->price->product;
-                           $stripeProductId = is_object($prod) ? (string)($prod->id ?? '') : (string)$prod;
-                       } elseif (isset($line->plan->product)) {
-                           // Fallback: older subscription items use plan.product
-                           $prod = $line->plan->product;
-                           $stripeProductId = is_object($prod) ? (string)($prod->id ?? '') : (string)$prod;
+                       // Handle both object and array structures
+                       if (is_object($line)) {
+                           if (isset($line->price->product)) {
+                               $prod = $line->price->product;
+                               $stripeProductId = is_object($prod) ? (string)($prod->id ?? '') : (string)$prod;
+                           } elseif (isset($line->plan->product)) {
+                               $prod = $line->plan->product;
+                               $stripeProductId = is_object($prod) ? (string)($prod->id ?? '') : (string)$prod;
+                           }
+                       } elseif (is_array($line)) {
+                           if (isset($line['price']['product'])) {
+                               $prod = $line['price']['product'];
+                               $stripeProductId = is_array($prod) ? ($prod['id'] ?? '') : (string)$prod;
+                           } elseif (isset($line['plan']['product'])) {
+                               $prod = $line['plan']['product'];
+                               $stripeProductId = is_array($prod) ? ($prod['id'] ?? '') : (string)$prod;
+                           }
                        }
 
                        if ($shouldDebug) {
-                           $lineType = $line->type ?? 'unknown';
-                           $hasPrice = isset($line->price) ? 'yes' : 'no';
-                           $hasPlan = isset($line->plan) ? 'yes' : 'no';
-                           $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] Line type={$lineType} product=" . ($stripeProductId ?: 'empty') . " price={$hasPrice} plan={$hasPlan}");
+                           $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] Line[$idx] product=" . ($stripeProductId ?: 'EMPTY'));
                        }
 
                        if (!$stripeProductId) continue;
