@@ -560,12 +560,16 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
 
                    // Process each line item
                    $lines = $inv->lines->data ?? [];
+                   $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] Invoice={$invoiceId} lines_count=" . count($lines));
+
                    foreach ($lines as $line) {
                        $stripeProductId = '';
                        if (isset($line->price->product)) {
                            $prod = $line->price->product;
                            $stripeProductId = is_object($prod) ? (string)($prod->id ?? '') : (string)$prod;
                        }
+
+                       $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] Line product=" . ($stripeProductId ?: 'empty') . " price_exists=" . (isset($line->price) ? 'yes' : 'no'));
 
                        if (!$stripeProductId) continue;
 
