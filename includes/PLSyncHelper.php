@@ -507,7 +507,7 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
     * @param array &$report Report buffer
     * @return void
     */
-   private function syncRenewalsForAllUsers(array $keys, array &$report): void {
+   private function syncRenewalsForAllUsers(array $keys, array &$report, ?string $emailTarget = null): void {
        $users = $this->wire('users');
        $renewalCount = 0;
        $userCount = 0;
@@ -518,7 +518,12 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
        foreach ($users->find("spl_purchases.count>0") as $u) {
            if (!$u->hasField('spl_purchases')) continue;
 
+           // Skip users not matching email target
+           $email = $u->email ?: $u->name;
+           if ($emailTarget && stripos($email, $emailTarget) === false) continue;
+
            $userHasRenewals = false;
+           $shouldDebug = (bool)$emailTarget; // Only debug when specific email is targeted
 
            foreach ($u->spl_purchases as $purchase) {
                $session = (array)$purchase->meta('stripe_session');
@@ -533,9 +538,10 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
                    $subId = (string)$sub['id'];
                }
 
-               // Debug: Log subscription extraction
-               $email = $u->email ?: $u->name;
-               $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] User={$email} purchase={$purchase->id} subscription_type=" . gettype($sub) . " subId=" . ($subId ?: 'null'));
+               // Debug: Log subscription extraction (only for targeted email)
+               if ($shouldDebug) {
+                   $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] User={$email} purchase={$purchase->id} subscription_type=" . gettype($sub) . " subId=" . ($subId ?: 'null'));
+               }
 
                if (!$subId) continue;
 
@@ -546,8 +552,10 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
                    if ($invoices) break;
                }
 
-               // Debug: Log invoice fetch results
-               $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] subId={$subId} invoices_found=" . count($invoices));
+               // Debug: Log invoice fetch results (only for targeted email)
+               if ($shouldDebug) {
+                   $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] subId={$subId} invoices_found=" . count($invoices));
+               }
 
                if (!$invoices) continue;
 
@@ -560,7 +568,9 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
 
                    // Process each line item
                    $lines = $inv->lines->data ?? [];
-                   $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] Invoice={$invoiceId} lines_count=" . count($lines));
+                   if ($shouldDebug) {
+                       $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] Invoice={$invoiceId} lines_count=" . count($lines));
+                   }
 
                    foreach ($lines as $line) {
                        $stripeProductId = '';
@@ -569,7 +579,9 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
                            $stripeProductId = is_object($prod) ? (string)($prod->id ?? '') : (string)$prod;
                        }
 
-                       $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] Line product=" . ($stripeProductId ?: 'empty') . " price_exists=" . (isset($line->price) ? 'yes' : 'no'));
+                       if ($shouldDebug) {
+                           $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] Line product=" . ($stripeProductId ?: 'empty') . " price_exists=" . (isset($line->price) ? 'yes' : 'no'));
+                       }
 
                        if (!$stripeProductId) continue;
 
@@ -1015,7 +1027,7 @@ public function runSync(array $cfg, ?string $emailTarget = null): void {
 	 }
    
 	 // Sync subscription renewals
-	 $this->syncRenewalsForAllUsers($opts['keys'], $r);
+	 $this->syncRenewalsForAllUsers($opts['keys'], $r, $emailTarget);
 
 	 $__totalMs = $this->ms($__tAll);
 	 $r[] = '';
