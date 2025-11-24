@@ -473,7 +473,6 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
                'subscription' => $subId,
                'status' => 'paid',
                'limit' => 100,
-               'expand' => ['data.lines.data.price'],
            ];
 
            $startingAfter = null;
@@ -567,10 +566,15 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
                foreach ($invoices as $inv) {
                    $invoiceId = (string)($inv->id ?? '');
 
-                   // Process each line item
-                   $lines = $inv->lines->data ?? [];
+                   // Process each line item - lines is a Stripe collection
+                   $linesObj = $inv->lines ?? null;
+                   $lines = [];
+                   if ($linesObj && isset($linesObj->data)) {
+                       $lines = is_array($linesObj->data) ? $linesObj->data : iterator_to_array($linesObj->data);
+                   }
+
                    if ($shouldDebug) {
-                       $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] Invoice={$invoiceId} lines_count=" . count($lines));
+                       $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] Invoice={$invoiceId} lines_count=" . count($lines) . " lines_type=" . gettype($linesObj->data ?? null));
                    }
 
                    foreach ($lines as $line) {
