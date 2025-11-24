@@ -523,7 +523,6 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
            if ($emailTarget && stripos($email, $emailTarget) === false) continue;
 
            $userHasRenewals = false;
-           $shouldDebug = (bool)$emailTarget; // Only debug when specific email is targeted
 
            foreach ($u->spl_purchases as $purchase) {
                $session = (array)$purchase->meta('stripe_session');
@@ -538,11 +537,6 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
                    $subId = (string)$sub['id'];
                }
 
-               // Debug: Log subscription extraction (only for targeted email)
-               if ($shouldDebug) {
-                   $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] User={$email} purchase={$purchase->id} subscription_type=" . gettype($sub) . " subId=" . ($subId ?: 'null'));
-               }
-
                if (!$subId) continue;
 
                // Try each key until we find invoices
@@ -550,11 +544,6 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
                foreach ($keys as $key) {
                    $invoices = $this->fetchRenewalInvoicesForSubscription($subId, $key);
                    if ($invoices) break;
-               }
-
-               // Debug: Log invoice fetch results (only for targeted email)
-               if ($shouldDebug) {
-                   $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] subId={$subId} invoices_found=" . count($invoices));
                }
 
                if (!$invoices) continue;
@@ -573,17 +562,7 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
                        $lines = is_array($linesObj->data) ? $linesObj->data : iterator_to_array($linesObj->data);
                    }
 
-                   if ($shouldDebug) {
-                       $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] Invoice={$invoiceId} lines_count=" . count($lines) . " lines_type=" . gettype($linesObj->data ?? null));
-                   }
-
                    foreach ($lines as $idx => $line) {
-                       // Debug: dump raw line data
-                       if ($shouldDebug) {
-                           $rawData = is_object($line) ? json_encode($line) : json_encode($line);
-                           $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] Line[$idx] RAW: " . substr($rawData, 0, 800));
-                       }
-
                        $stripeProductId = '';
 
                        // Handle both object and array structures
@@ -615,19 +594,11 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
                            }
                        }
 
-                       if ($shouldDebug) {
-                           $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] Line[$idx] product=" . ($stripeProductId ?: 'EMPTY'));
-                       }
-
                        if (!$stripeProductId) continue;
 
                        // Build scope key
                        $mappedId = $this->mapStripeProductToPageId($stripeProductId);
                        $scopeKey = $mappedId ? (string)$mappedId : ('0#' . $stripeProductId);
-
-                       if ($shouldDebug) {
-                           $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] scopeKey={$scopeKey} mappedId=" . ($mappedId ?: 'null') . " invoice={$invoiceId}");
-                       }
 
                        // Check if this invoice already exists for this scope
                        if (!isset($renewals[$scopeKey])) $renewals[$scopeKey] = [];
@@ -649,13 +620,6 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
                            ];
                            $changed = true;
                            $renewalCount++;
-                           if ($shouldDebug) {
-                               $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] ADDED renewal for scopeKey={$scopeKey} invoice={$invoiceId}");
-                           }
-                       } else {
-                           if ($shouldDebug) {
-                               $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] SKIPPED (exists) scopeKey={$scopeKey} invoice={$invoiceId}");
-                           }
                        }
                    }
                }
