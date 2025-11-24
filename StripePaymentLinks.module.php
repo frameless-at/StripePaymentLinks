@@ -687,7 +687,7 @@ public function processCheckout(Page $currentPage): void {
 		 $checkoutSession = $bundle['session'];
 		 /** @var \Stripe\StripeClient $stripe */
 		 $stripe = $bundle['client'];
-	 
+
 		 if (($checkoutSession->payment_status ?? null) !== 'paid') return;
 	 
 		 // Buyer data
@@ -722,7 +722,7 @@ public function processCheckout(Page $currentPage): void {
 		   }
 		   if (is_string($sessionObj->subscription ?? null) && $sessionObj->subscription !== '') {
 			 try {
-			   $sub = $client->subscriptions->retrieve($sessionObj->subscription, []);
+			   $sub = $client->subscriptions->retrieve($sessionObj->subscription, ['expand' => ['items']]);
 			   if (!empty($sub->current_period_end)) return (int)$sub->current_period_end;
 			   if (!empty($sub->items->data) && is_array($sub->items->data)) {
 				 foreach ($sub->items->data as $si) {
@@ -769,9 +769,19 @@ public function processCheckout(Page $currentPage): void {
 		 $productIds = array_values(array_unique(array_map('intval', $productIds)));
 	 
 		 // ---- subscription state + effective end ----
-		 $sub    = (is_object($checkoutSession->subscription ?? null)) ? $checkoutSession->subscription : null;
-		 if (!$sub && is_string($checkoutSession->subscription ?? null) && $checkoutSession->subscription !== '') {
-		   try { $sub = $stripe->subscriptions->retrieve($checkoutSession->subscription, []); } catch (\Throwable $e) {}
+		 $sub = null;
+		 $subId = null;
+
+		 // Get subscription ID from checkout session
+		 if (is_object($checkoutSession->subscription ?? null)) {
+		   $subId = (string)($checkoutSession->subscription->id ?? '');
+		 } elseif (is_string($checkoutSession->subscription ?? null) && $checkoutSession->subscription !== '') {
+		   $subId = $checkoutSession->subscription;
+		 }
+
+		 // Always retrieve subscription with items expanded
+		 if ($subId) {
+		   try { $sub = $stripe->subscriptions->retrieve($subId, ['expand' => ['items']]); } catch (\Throwable $e) {}
 		 }
 	 
 		 $canceled = $sub ? ((string)($sub->status ?? '') === 'canceled') : null;
@@ -796,7 +806,7 @@ public function processCheckout(Page $currentPage): void {
 	 
 		 // ---- compute subscription product scope keys (ONLY recurring) ----
 		 $subscriptionScopeKeys = [];
-		 if ($sub && isset($sub->items->data) && is_array($sub->items->data)) {
+		 if ($sub && !empty($sub->items->data)) {
 		   foreach ($sub->items->data as $si) {
 			 $stripeProd = (string)($si->price->product ?? '');
 			 if ($stripeProd !== '') {
@@ -886,7 +896,7 @@ public function processCheckout(Page $currentPage): void {
 			 'unmapped'       => $unmapped ? implode(', ', $unmapped) : '-',
 			 'newUser'        => $isNew ? 'yes' : 'no',
 			 'subPeriodEnd'   => $subscriptionPeriodEnd ?: '-',
-			 'subProductIds'  => $subscriptionPids ?: [],
+			 'subScopeKeys'   => $subscriptionScopeKeys ?: [],
 		   ], JSON_UNESCAPED_SLASHES)
 		 );
 	 

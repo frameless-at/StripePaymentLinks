@@ -56,6 +56,10 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 
 		// Line items detail
 		'line_items_count'  => ['label' => 'Items Count', 'type' => 'computed', 'compute' => 'computeLineItemsCount'],
+
+		// Renewals
+		'renewal_count'     => ['label' => 'Renewal Count', 'type' => 'computed', 'compute' => 'computeRenewalCount'],
+		'last_renewal'      => ['label' => 'Last Renewal', 'type' => 'computed', 'compute' => 'computeLastRenewal'],
 	];
 
 	/**
@@ -73,13 +77,14 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 	 * Available columns for Products tab
 	 */
 	protected array $availableProductsColumns = [
-		'name'          => ['label' => 'Product Name'],
-		'purchases'     => ['label' => 'Purchases'],
-		'quantity'      => ['label' => 'Quantity'],
-		'revenue'       => ['label' => 'Revenue'],
-		'last_purchase' => ['label' => 'Last Purchase'],
-		'page_id'       => ['label' => 'Page ID'],
-		'stripe_id'     => ['label' => 'Stripe Product ID'],
+		'name'            => ['label' => 'Product Name'],
+		'purchases'       => ['label' => 'Purchases'],
+		'quantity'        => ['label' => 'Quantity'],
+		'revenue'         => ['label' => 'Revenue'],
+		'last_purchase'   => ['label' => 'Last Purchase'],
+		'renewals'        => ['label' => 'Renewals'],
+		'page_id'         => ['label' => 'Page ID'],
+		'stripe_id'       => ['label' => 'Stripe Product ID'],
 	];
 
 	/**
@@ -403,6 +408,13 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 						$total += (int)($li['amount_total'] ?? 0);
 						if (!$currency) $currency = strtoupper($li['currency'] ?? $session['currency'] ?? '');
 					}
+					// Add renewal amounts
+					$renewals = (array)$purchase['item']->meta('renewals');
+					foreach ($renewals as $scopeRenewals) {
+						foreach ((array)$scopeRenewals as $renewal) {
+							$total += (int)($renewal['amount'] ?? 0);
+						}
+					}
 					$row[] = $total > 0 ? $this->formatPrice($total, $currency) : '';
 				} else {
 					$row[] = $this->getColumnValue($purchase['user'], $purchase['item'], $col);
@@ -668,6 +680,35 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 	}
 
 	/**
+	 * Compute renewal count
+	 */
+	protected function computeRenewalCount(User $user, Page $item): string {
+		$renewals = (array)$item->meta('renewals');
+		$count = 0;
+		foreach ($renewals as $scopeRenewals) {
+			$count += count((array)$scopeRenewals);
+		}
+		return $count > 0 ? (string)$count : '';
+	}
+
+	/**
+	 * Compute last renewal date
+	 */
+	protected function computeLastRenewal(User $user, Page $item): string {
+		$renewals = (array)$item->meta('renewals');
+		$lastDate = 0;
+
+		foreach ($renewals as $scopeRenewals) {
+			foreach ((array)$scopeRenewals as $renewal) {
+				$date = (int)($renewal['date'] ?? 0);
+				if ($date > $lastDate) $lastDate = $date;
+			}
+		}
+
+		return $lastDate > 0 ? date('Y-m-d', $lastDate) : '';
+	}
+
+	/**
 	 * Render pagination row with pager and export button
 	 */
 	protected function renderPaginationRow(int $total, int $perPage, int $currentPage, string $exportAction = 'export'): string {
@@ -844,6 +885,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 							'revenue' => 0,
 							'currency' => $currency,
 							'last_purchase' => 0,
+							'renewals' => 0,
 						];
 					}
 
@@ -852,6 +894,25 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 					$productData[$key]['revenue'] += $amount;
 					if ($purchaseDate > $productData[$key]['last_purchase']) {
 						$productData[$key]['last_purchase'] = $purchaseDate;
+					}
+				}
+
+				// Aggregate renewals - add to revenue
+				$renewals = (array)$item->meta('renewals');
+				foreach ($renewals as $scopeKey => $scopeRenewals) {
+					// Match scope key to product key
+					$renewalKey = null;
+					if (is_numeric($scopeKey) && (int)$scopeKey > 0) {
+						$renewalKey = (int)$scopeKey;
+					} elseif (strpos($scopeKey, '0#') === 0) {
+						$renewalKey = 'stripe:' . substr($scopeKey, 2);
+					}
+
+					if ($renewalKey && isset($productData[$renewalKey])) {
+						foreach ((array)$scopeRenewals as $renewal) {
+							$productData[$renewalKey]['renewals']++;
+							$productData[$renewalKey]['revenue'] += (int)($renewal['amount'] ?? 0);
+						}
 					}
 				}
 			}
@@ -909,6 +970,9 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 							break;
 						case 'last_purchase':
 							$row[] = $data['last_purchase'] ? date('Y-m-d', $data['last_purchase']) : '-';
+							break;
+						case 'renewals':
+							$row[] = $data['renewals'] ?: '-';
 							break;
 						case 'page_id':
 							$row[] = $data['page_id'] ?: '-';
@@ -986,6 +1050,7 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 							'revenue' => 0,
 							'currency' => $currency,
 							'last_purchase' => 0,
+							'renewals' => 0,
 						];
 					}
 
@@ -994,6 +1059,24 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 					$productData[$key]['revenue'] += $amount;
 					if ($purchaseDate > $productData[$key]['last_purchase']) {
 						$productData[$key]['last_purchase'] = $purchaseDate;
+					}
+				}
+
+				// Aggregate renewals - add to revenue
+				$renewals = (array)$item->meta('renewals');
+				foreach ($renewals as $scopeKey => $scopeRenewals) {
+					$renewalKey = null;
+					if (is_numeric($scopeKey) && (int)$scopeKey > 0) {
+						$renewalKey = (int)$scopeKey;
+					} elseif (strpos($scopeKey, '0#') === 0) {
+						$renewalKey = 'stripe:' . substr($scopeKey, 2);
+					}
+
+					if ($renewalKey && isset($productData[$renewalKey])) {
+						foreach ((array)$scopeRenewals as $renewal) {
+							$productData[$renewalKey]['renewals']++;
+							$productData[$renewalKey]['revenue'] += (int)($renewal['amount'] ?? 0);
+						}
 					}
 				}
 			}
@@ -1037,6 +1120,9 @@ class ProcessStripePaymentLinksAdmin extends Process implements ConfigurableModu
 						break;
 					case 'last_purchase':
 						$row[] = $data['last_purchase'] ? date('Y-m-d', $data['last_purchase']) : '';
+						break;
+					case 'renewals':
+						$row[] = $data['renewals'] ?: '';
 						break;
 					case 'page_id':
 						$row[] = $data['page_id'] ?: '';
