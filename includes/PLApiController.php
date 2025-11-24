@@ -627,8 +627,18 @@ private function markCanceledForKeys(\ProcessWire\User $u, array $keys, int $end
 
 	foreach ($lines as $line) {
 	  $stripeProductId = '';
-	  if (isset($line->price->product)) {
+
+	  // New API: pricing.price_details.product
+	  if (isset($line->pricing->price_details->product)) {
+		$prod = $line->pricing->price_details->product;
+		$stripeProductId = is_object($prod) ? (string)($prod->id ?? '') : (string)$prod;
+	  // Old API: price.product
+	  } elseif (isset($line->price->product)) {
 		$prod = $line->price->product;
+		$stripeProductId = is_object($prod) ? (string)($prod->id ?? '') : (string)$prod;
+	  } elseif (isset($line->plan->product)) {
+		// Even older: plan.product
+		$prod = $line->plan->product;
 		$stripeProductId = is_object($prod) ? (string)($prod->id ?? '') : (string)$prod;
 	  }
 
