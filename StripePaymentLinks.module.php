@@ -688,17 +688,6 @@ public function processCheckout(Page $currentPage): void {
 		 /** @var \Stripe\StripeClient $stripe */
 		 $stripe = $bundle['client'];
 
-		 // Debug: log checkout session details
-		 $debugRecurring = [];
-		 foreach ((array)($checkoutSession->line_items->data ?? []) as $dli) {
-		   $priceType = $dli->price->type ?? 'unknown';
-		   $recurringInterval = $dli->price->recurring->interval ?? null;
-		   if ($priceType === 'recurring' || $recurringInterval) {
-		     $debugRecurring[] = ($dli->price->product->name ?? $dli->description ?? 'item') . ' (' . ($recurringInterval ?? 'recurring') . ')';
-		   }
-		 }
-		 $this->wire('log')->save(self::LOG_PL, '[DEBUG] Checkout session id=' . $sessionId . ' mode=' . ($checkoutSession->mode ?? 'null') . ' subscription=' . json_encode($checkoutSession->subscription ?? null) . ' recurring_items=' . json_encode($debugRecurring));
-
 		 if (($checkoutSession->payment_status ?? null) !== 'paid') return;
 	 
 		 // Buyer data
@@ -829,8 +818,6 @@ public function processCheckout(Page $currentPage): void {
 		   }
 		 }
 		 $subscriptionScopeKeys = array_values(array_unique($subscriptionScopeKeys));
-
-		 $this->wire('log')->save(self::LOG_PL, '[DEBUG] subId=' . ($subId ?? 'null') . ' effectiveEnd=' . ($effectiveEnd ?? 'null') . ' scopeKeys=' . json_encode($subscriptionScopeKeys));
 
 		 // ---- persist repeater item ----
 		 if ($buyer->hasField('spl_purchases')) {
