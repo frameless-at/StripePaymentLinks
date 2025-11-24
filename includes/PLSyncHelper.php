@@ -533,6 +533,10 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
                    $subId = (string)$sub['id'];
                }
 
+               // Debug: Log subscription extraction
+               $email = $u->email ?: $u->name;
+               $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] User={$email} purchase={$purchase->id} subscription_type=" . gettype($sub) . " subId=" . ($subId ?: 'null'));
+
                if (!$subId) continue;
 
                // Try each key until we find invoices
@@ -541,6 +545,9 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
                    $invoices = $this->fetchRenewalInvoicesForSubscription($subId, $key);
                    if ($invoices) break;
                }
+
+               // Debug: Log invoice fetch results
+               $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] subId={$subId} invoices_found=" . count($invoices));
 
                if (!$invoices) continue;
 
