@@ -575,13 +575,22 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
 
                    foreach ($lines as $line) {
                        $stripeProductId = '';
+
+                       // Try multiple ways to get product ID
                        if (isset($line->price->product)) {
                            $prod = $line->price->product;
+                           $stripeProductId = is_object($prod) ? (string)($prod->id ?? '') : (string)$prod;
+                       } elseif (isset($line->plan->product)) {
+                           // Fallback: older subscription items use plan.product
+                           $prod = $line->plan->product;
                            $stripeProductId = is_object($prod) ? (string)($prod->id ?? '') : (string)$prod;
                        }
 
                        if ($shouldDebug) {
-                           $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] Line product=" . ($stripeProductId ?: 'empty') . " price_exists=" . (isset($line->price) ? 'yes' : 'no'));
+                           $lineType = $line->type ?? 'unknown';
+                           $hasPrice = isset($line->price) ? 'yes' : 'no';
+                           $hasPlan = isset($line->plan) ? 'yes' : 'no';
+                           $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] Line type={$lineType} product=" . ($stripeProductId ?: 'empty') . " price={$hasPrice} plan={$hasPlan}");
                        }
 
                        if (!$stripeProductId) continue;
