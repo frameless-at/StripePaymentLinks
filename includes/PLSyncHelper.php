@@ -507,7 +507,7 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
     * @param array &$report Report buffer
     * @return void
     */
-   private function syncRenewalsForAllUsers(array $keys, array &$report): void {
+   private function syncRenewalsForAllUsers(array $keys, array &$report, ?string $emailTarget = null): void {
        $users = $this->wire('users');
        $renewalCount = 0;
        $userCount = 0;
@@ -517,6 +517,10 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
 
        foreach ($users->find("spl_purchases.count>0") as $u) {
            if (!$u->hasField('spl_purchases')) continue;
+
+           // Skip users not matching email target
+           $email = $u->email ?: $u->name;
+           if ($emailTarget && stripos($email, $emailTarget) === false) continue;
 
            $userHasRenewals = false;
 
@@ -551,13 +555,43 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
                foreach ($invoices as $inv) {
                    $invoiceId = (string)($inv->id ?? '');
 
-                   // Process each line item
-                   $lines = $inv->lines->data ?? [];
-                   foreach ($lines as $line) {
+                   // Process each line item - lines is a Stripe collection
+                   $linesObj = $inv->lines ?? null;
+                   $lines = [];
+                   if ($linesObj && isset($linesObj->data)) {
+                       $lines = is_array($linesObj->data) ? $linesObj->data : iterator_to_array($linesObj->data);
+                   }
+
+                   foreach ($lines as $idx => $line) {
                        $stripeProductId = '';
-                       if (isset($line->price->product)) {
-                           $prod = $line->price->product;
-                           $stripeProductId = is_object($prod) ? (string)($prod->id ?? '') : (string)$prod;
+
+                       // Handle both object and array structures
+                       if (is_object($line)) {
+                           // New API: pricing.price_details.product
+                           if (isset($line->pricing->price_details->product)) {
+                               $prod = $line->pricing->price_details->product;
+                               $stripeProductId = is_object($prod) ? (string)($prod->id ?? '') : (string)$prod;
+                           // Old API: price.product
+                           } elseif (isset($line->price->product)) {
+                               $prod = $line->price->product;
+                               $stripeProductId = is_object($prod) ? (string)($prod->id ?? '') : (string)$prod;
+                           } elseif (isset($line->plan->product)) {
+                               $prod = $line->plan->product;
+                               $stripeProductId = is_object($prod) ? (string)($prod->id ?? '') : (string)$prod;
+                           }
+                       } elseif (is_array($line)) {
+                           // New API: pricing.price_details.product
+                           if (isset($line['pricing']['price_details']['product'])) {
+                               $prod = $line['pricing']['price_details']['product'];
+                               $stripeProductId = is_array($prod) ? ($prod['id'] ?? '') : (string)$prod;
+                           // Old API: price.product
+                           } elseif (isset($line['price']['product'])) {
+                               $prod = $line['price']['product'];
+                               $stripeProductId = is_array($prod) ? ($prod['id'] ?? '') : (string)$prod;
+                           } elseif (isset($line['plan']['product'])) {
+                               $prod = $line['plan']['product'];
+                               $stripeProductId = is_array($prod) ? ($prod['id'] ?? '') : (string)$prod;
+                           }
                        }
 
                        if (!$stripeProductId) continue;
@@ -1004,7 +1038,7 @@ public function runSync(array $cfg, ?string $emailTarget = null): void {
 	 }
    
 	 // Sync subscription renewals
-	 $this->syncRenewalsForAllUsers($opts['keys'], $r);
+	 $this->syncRenewalsForAllUsers($opts['keys'], $r, $emailTarget);
 
 	 $__totalMs = $this->ms($__tAll);
 	 $r[] = '';
