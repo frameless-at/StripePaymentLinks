@@ -625,6 +625,10 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
                        $mappedId = $this->mapStripeProductToPageId($stripeProductId);
                        $scopeKey = $mappedId ? (string)$mappedId : ('0#' . $stripeProductId);
 
+                       if ($shouldDebug) {
+                           $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] scopeKey={$scopeKey} mappedId=" . ($mappedId ?: 'null') . " invoice={$invoiceId}");
+                       }
+
                        // Check if this invoice already exists for this scope
                        if (!isset($renewals[$scopeKey])) $renewals[$scopeKey] = [];
 
@@ -645,6 +649,13 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
                            ];
                            $changed = true;
                            $renewalCount++;
+                           if ($shouldDebug) {
+                               $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] ADDED renewal for scopeKey={$scopeKey} invoice={$invoiceId}");
+                           }
+                       } else {
+                           if ($shouldDebug) {
+                               $this->wire('log')->save(StripePaymentLinks::LOG_PL, "[SYNC DEBUG] SKIPPED (exists) scopeKey={$scopeKey} invoice={$invoiceId}");
+                           }
                        }
                    }
                }
