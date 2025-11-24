@@ -455,6 +455,162 @@ private function reportSessionRow($s, array &$report, string $apiKey, array $pre
 	   $u->of(true);
    }
    
+   /**
+    * Fetch all paid invoices for a subscription (excluding initial creation).
+    *
+    * @param string $subId Stripe Subscription ID
+    * @param string $apiKey Stripe API key
+    * @return array Array of invoice objects
+    */
+   private function fetchRenewalInvoicesForSubscription(string $subId, string $apiKey): array {
+       if (!$subId) return [];
+
+       $client = $this->clientFor($apiKey);
+       $renewals = [];
+
+       try {
+           $params = [
+               'subscription' => $subId,
+               'status' => 'paid',
+               'limit' => 100,
+           ];
+
+           $startingAfter = null;
+           do {
+               $pageParams = $params;
+               if ($startingAfter) $pageParams['starting_after'] = $startingAfter;
+
+               $page = $client->invoices->all($pageParams);
+               $data = (is_object($page) && isset($page->data) && is_array($page->data)) ? $page->data : [];
+
+               foreach ($data as $inv) {
+                   // Skip initial subscription creation invoice
+                   if (($inv->billing_reason ?? '') === 'subscription_create') continue;
+
+                   $renewals[] = $inv;
+               }
+
+               $startingAfter = count($data) ? end($data)->id : null;
+           } while (!empty($page->has_more));
+
+       } catch (\Throwable $e) {
+           $this->wire('log')->save(StripePaymentLinks::LOG_PL, '[SYNC] fetchRenewalInvoices error: ' . $e->getMessage());
+       }
+
+       return $renewals;
+   }
+
+   /**
+    * Sync subscription renewals for all users with purchases.
+    *
+    * @param array $keys Stripe API keys to use
+    * @param array &$report Report buffer
+    * @return void
+    */
+   private function syncRenewalsForAllUsers(array $keys, array &$report): void {
+       $users = $this->wire('users');
+       $renewalCount = 0;
+       $userCount = 0;
+
+       $report[] = '';
+       $report[] = '--- Syncing Subscription Renewals ---';
+
+       foreach ($users->find("spl_purchases.count>0") as $u) {
+           if (!$u->hasField('spl_purchases')) continue;
+
+           $userHasRenewals = false;
+
+           foreach ($u->spl_purchases as $purchase) {
+               $session = (array)$purchase->meta('stripe_session');
+               if (!$session) continue;
+
+               // Extract subscription ID
+               $subId = null;
+               $sub = $session['subscription'] ?? null;
+               if (is_string($sub) && $sub !== '') {
+                   $subId = $sub;
+               } elseif (is_array($sub) && !empty($sub['id'])) {
+                   $subId = (string)$sub['id'];
+               }
+
+               if (!$subId) continue;
+
+               // Try each key until we find invoices
+               $invoices = [];
+               foreach ($keys as $key) {
+                   $invoices = $this->fetchRenewalInvoicesForSubscription($subId, $key);
+                   if ($invoices) break;
+               }
+
+               if (!$invoices) continue;
+
+               // Build renewals structure
+               $renewals = (array)$purchase->meta('renewals');
+               $changed = false;
+
+               foreach ($invoices as $inv) {
+                   $invoiceId = (string)($inv->id ?? '');
+
+                   // Process each line item
+                   $lines = $inv->lines->data ?? [];
+                   foreach ($lines as $line) {
+                       $stripeProductId = '';
+                       if (isset($line->price->product)) {
+                           $prod = $line->price->product;
+                           $stripeProductId = is_object($prod) ? (string)($prod->id ?? '') : (string)$prod;
+                       }
+
+                       if (!$stripeProductId) continue;
+
+                       // Build scope key
+                       $mappedId = $this->mapStripeProductToPageId($stripeProductId);
+                       $scopeKey = $mappedId ? (string)$mappedId : ('0#' . $stripeProductId);
+
+                       // Check if this invoice already exists for this scope
+                       if (!isset($renewals[$scopeKey])) $renewals[$scopeKey] = [];
+
+                       $exists = false;
+                       foreach ($renewals[$scopeKey] as $existing) {
+                           if (($existing['invoice'] ?? '') === $invoiceId) {
+                               $exists = true;
+                               break;
+                           }
+                       }
+
+                       if (!$exists) {
+                           $renewals[$scopeKey][] = [
+                               'date'    => (int)($inv->created ?? time()),
+                               'amount'  => (int)($line->amount ?? 0),
+                               'invoice' => $invoiceId,
+                               'sub'     => $subId,
+                           ];
+                           $changed = true;
+                           $renewalCount++;
+                       }
+                   }
+               }
+
+               // Save if changed
+               if ($changed && !$this->optDry) {
+                   $purchase->of(false);
+                   $purchase->meta('renewals', $renewals);
+                   $purchase->save(['quiet' => true]);
+                   $userHasRenewals = true;
+               } elseif ($changed) {
+                   $userHasRenewals = true;
+               }
+           }
+
+           if ($userHasRenewals) {
+               $userCount++;
+               $email = $u->email ?: $u->name;
+               $report[] = "  {$email}: renewals synced";
+           }
+       }
+
+       $report[] = "Renewals found: {$renewalCount} (across {$userCount} users)";
+   }
+
    private function backfillPeriodEndsForUser(\ProcessWire\User $u, \Stripe\StripeClient $client): void {
 	   if (!$u->hasField('spl_purchases') || !$u->spl_purchases->count()) return;
    
@@ -847,10 +1003,14 @@ public function runSync(array $cfg, ?string $emailTarget = null): void {
 	   $r[] = 'Total sessions found (all pages): ' . $total;
 	 }
    
+	 // Sync subscription renewals
+	 $this->syncRenewalsForAllUsers($opts['keys'], $r);
+
 	 $__totalMs = $this->ms($__tAll);
+	 $r[] = '';
 	 $r[] = 'Total duration: ' . $this->fmtDuration($__totalMs);
 	 $r[] = $this->optDry ? 'Done (read-only).' : 'Done (writes applied when needed).';
-   
+
 	 $ses->set('pl_sync_report', implode("\n", $r));
    }
       

@@ -198,14 +198,14 @@ final class PLApiController {
    		 case 'invoice.payment_succeeded': {
 		   $customerId = (string)($obj->customer ?? '');
 		   if (!$customerId) { wire('log')->save(StripePaymentLinks::LOG_PL, '[WEBHOOK] invoice.succeeded: missing customer id'); break; }
-		 
+
 		   $u = $this->findUserByStripeCustomerId($customerId);
 		   if (!$u || !$u->id) { wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] invoice.succeeded: no user for $customerId"); break; }
-		 
+
 		   $parsed = $this->scopeKeysFromInvoice($obj);
 		   $groups = (array)($parsed['groups'] ?? []);
 		   $end    = $parsed['period_end'] ?? null;
-		 
+
 		   if ($end && $groups) {
 			 foreach ($groups as $subId => $keys) {
 			   if (!$keys) continue;
@@ -221,6 +221,12 @@ final class PLApiController {
 			 }
 		   } else {
 			 wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] invoice.succeeded: nothing to update");
+		   }
+
+		   // Store renewal if not initial subscription creation
+		   $billingReason = (string)($obj->billing_reason ?? '');
+		   if ($billingReason !== 'subscription_create' && $billingReason !== '') {
+			   $this->addRenewalFromInvoice($u, $obj);
 		   }
 		   break;
 		 }
@@ -589,5 +595,110 @@ private function markCanceledForKeys(\ProcessWire\User $u, array $keys, int $end
 	  }
 	  return $changed;
 	}, $subscriptionId);
+  }
+
+  /**
+   * Add a renewal entry from a Stripe Invoice webhook event.
+   * Deduplicates by invoice ID to prevent duplicates from manual sync.
+   *
+   * @param \ProcessWire\User $u User to update
+   * @param object $invoice Stripe Invoice object from webhook
+   */
+  private function addRenewalFromInvoice(\ProcessWire\User $u, $invoice): void {
+	if (!$u->hasField('spl_purchases') || !$u->spl_purchases->count()) return;
+
+	$invoiceId = (string)($invoice->id ?? '');
+	if (!$invoiceId) return;
+
+	$pages = $this->mod->wire('pages');
+	$san = $this->mod->wire('sanitizer');
+
+	// Get subscription ID from invoice
+	$subId = null;
+	if (isset($invoice->subscription)) {
+	  $subId = is_string($invoice->subscription) ? $invoice->subscription : (string)($invoice->subscription->id ?? '');
+	}
+
+	// Process invoice lines
+	$lines = $invoice->lines->data ?? [];
+	if (!is_array($lines) || !$lines) return;
+
+	$renewalsByScope = [];
+
+	foreach ($lines as $line) {
+	  $stripeProductId = '';
+	  if (isset($line->price->product)) {
+		$prod = $line->price->product;
+		$stripeProductId = is_object($prod) ? (string)($prod->id ?? '') : (string)$prod;
+	  }
+
+	  if (!$stripeProductId) continue;
+
+	  // Build scope key (same logic as PLSyncHelper)
+	  $mappedId = 0;
+	  $sid = $san->selectorValue($stripeProductId);
+	  if ($sid !== '') {
+		$p = $pages->get("stripe_product_id=$sid");
+		if ($p && $p->id) $mappedId = (int)$p->id;
+	  }
+	  $scopeKey = $mappedId > 0 ? (string)$mappedId : ('0#' . $stripeProductId);
+
+	  $renewalsByScope[$scopeKey] = [
+		'date'    => (int)($invoice->created ?? time()),
+		'amount'  => (int)($line->amount ?? 0),
+		'invoice' => $invoiceId,
+		'sub'     => $subId,
+	  ];
+	}
+
+	if (!$renewalsByScope) return;
+
+	// Find matching purchase and add renewals
+	foreach ($u->spl_purchases as $purchase) {
+	  $session = (array)$purchase->meta('stripe_session');
+	  if (!$session) continue;
+
+	  // Check if this purchase has the subscription
+	  $purchaseSubId = null;
+	  $sub = $session['subscription'] ?? null;
+	  if (is_string($sub) && $sub !== '') {
+		$purchaseSubId = $sub;
+	  } elseif (is_array($sub) && !empty($sub['id'])) {
+		$purchaseSubId = (string)$sub['id'];
+	  }
+
+	  if ($subId && $purchaseSubId !== $subId) continue;
+
+	  // Add renewals to this purchase
+	  $renewals = (array)$purchase->meta('renewals');
+	  $changed = false;
+
+	  foreach ($renewalsByScope as $scopeKey => $renewal) {
+		if (!isset($renewals[$scopeKey])) $renewals[$scopeKey] = [];
+
+		// Check for duplicate invoice
+		$exists = false;
+		foreach ($renewals[$scopeKey] as $existing) {
+		  if (($existing['invoice'] ?? '') === $invoiceId) {
+			$exists = true;
+			break;
+		  }
+		}
+
+		if (!$exists) {
+		  $renewals[$scopeKey][] = $renewal;
+		  $changed = true;
+		}
+	  }
+
+	  if ($changed) {
+		$purchase->of(false);
+		$purchase->meta('renewals', $renewals);
+		$purchase->save(['quiet' => true]);
+		wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] renewal added for user {$u->id} invoice={$invoiceId}");
+	  }
+
+	  break; // Only update first matching purchase
+	}
   }
 }
