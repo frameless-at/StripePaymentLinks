@@ -2000,20 +2000,11 @@ public function processCheckout(Page $currentPage): void {
 	 * scans all purchases and removes renewals where the scope key doesn't match
 	 * any of the purchase's line item products.
 	 *
-	 * Usage from ProcessWire backend (Setup → API):
-	 * <code>
+	 * Usage in init.php (remove after successful run):
 	 * $module = $modules->get('StripePaymentLinks');
 	 * $stats = $module->cleanupInvalidRenewals();
 	 * echo "Cleaned: {$stats['cleaned']} invalid renewals\n";
 	 * echo "Checked: {$stats['total_purchases']} purchases in {$stats['total_users']} users\n";
-	 * </code>
-	 *
-	 * Or via CLI/console:
-	 * <code>
-	 * $module = wire('modules')->get('StripePaymentLinks');
-	 * $stats = $module->cleanupInvalidRenewals();
-	 * var_dump($stats);
-	 * </code>
 	 *
 	 * @return array Stats about cleanup [cleaned, total_purchases, total_users]
 	 */
