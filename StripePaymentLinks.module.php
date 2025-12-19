@@ -1161,7 +1161,6 @@ public function processCheckout(Page $currentPage): void {
 			'label' => '🔍 Debug Data',
 			'collapsed' => Inputfield::collapsedYes,
 			'rows' => 20,
-			'contentType' => FieldtypeTextarea::contentTypeJSON,
 		]);
 				
 		$repChanged = false;
