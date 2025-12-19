@@ -1894,101 +1894,25 @@ public function processCheckout(Page $currentPage): void {
 	protected function generateDebugData(\ProcessWire\RepeaterPage $item): string {
 		$data = [];
 
-		// === BASIC INFO ===
-		$data['__BASIC_INFO__'] = [
-			'id' => $item->id,
-			'created' => $item->created ? date('Y-m-d H:i:s', $item->created) : null,
-			'modified' => $item->modified ? date('Y-m-d H:i:s', $item->modified) : null,
-			'created_unix' => $item->created,
-			'modified_unix' => $item->modified,
+		// Get ALL meta keys - we check all known ones
+		$metaKeys = [
+			'stripe_session',
+			'product_ids',
+			'period_end_map',
+			'renewals',
+			'subscription_id',
+			'invoice_id',
+			'customer_id',
+			'payment_intent',
 		];
 
-		// === FIELDS ===
-		$data['__FIELDS__'] = [
-			'purchase_date' => $item->purchase_date ? date('Y-m-d H:i:s', $item->purchase_date) : null,
-			'purchase_date_unix' => $item->purchase_date ?: null,
-			'purchase_lines' => $item->purchase_lines ?: null,
-		];
-
-		// === ALL META DATA (raw) ===
-		// Get all meta keys that are set
-		$allMeta = [];
-
-		// Try to get all meta data - ProcessWire stores meta in a special way
-		// We need to check for known meta keys and also try to get all
-		$knownMetaKeys = ['stripe_session', 'product_ids', 'period_end_map', 'renewals'];
-
-		foreach ($knownMetaKeys as $key) {
+		// Add each meta key with its ORIGINAL name if it exists
+		foreach ($metaKeys as $key) {
 			$value = $item->meta($key);
 			if ($value !== null && $value !== '' && $value !== []) {
-				$allMeta[$key] = $value;
+				$data[$key] = $value;
 			}
 		}
-
-		// Try to get any additional meta that might exist
-		// ProcessWire doesn't have a built-in "get all meta" method, so we check common ones
-		$additionalKeys = ['subscription_id', 'invoice_id', 'customer_id', 'payment_intent'];
-		foreach ($additionalKeys as $key) {
-			$value = $item->meta($key);
-			if ($value !== null && $value !== '' && $value !== []) {
-				$allMeta[$key] = $value;
-			}
-		}
-
-		$data['__ALL_META_RAW__'] = $allMeta;
-
-		// === DECODED/ENHANCED META ===
-
-		// Stripe Session (keep full structure)
-		if (!empty($allMeta['stripe_session'])) {
-			$data['stripe_session'] = $allMeta['stripe_session'];
-		}
-
-		// Product IDs with page titles
-		if (!empty($allMeta['product_ids'])) {
-			$productIds = (array) $allMeta['product_ids'];
-			$mapped = [];
-			foreach ($productIds as $pid) {
-				$p = $this->wire('pages')->get((int)$pid);
-				$mapped[] = [
-					'id' => (int)$pid,
-					'title' => $p && $p->id ? $p->title : '(not found)',
-					'stripe_product_id' => $p && $p->id ? $p->stripe_product_id : null,
-				];
-			}
-			$data['product_ids_decoded'] = $mapped;
-		}
-
-		// Period End Map with decoded timestamps
-		if (!empty($allMeta['period_end_map'])) {
-			$periodEndMap = (array) $allMeta['period_end_map'];
-			$decoded = [];
-			foreach ($periodEndMap as $key => $value) {
-				$decodedValue = '';
-				if (is_numeric($value) && $value > 0) {
-					$decodedValue = date('Y-m-d H:i:s', (int)$value);
-				} elseif ($value === 1) {
-					$decodedValue = 'flag (true)';
-				}
-
-				$decoded[$key] = [
-					'raw' => $value,
-					'decoded' => $decodedValue,
-					'is_paused_flag' => strpos($key, '_paused') !== false,
-					'is_canceled_flag' => strpos($key, '_canceled') !== false,
-				];
-			}
-			$data['period_end_map_decoded'] = $decoded;
-		}
-
-		// Renewals
-		if (!empty($allMeta['renewals'])) {
-			$data['renewals'] = $allMeta['renewals'];
-		}
-
-		// === VALIDATION (at the end for better readability) ===
-		$validation = $this->validatePurchaseData($item);
-		$data['__VALIDATION__'] = $validation;
 
 		return json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 	}
