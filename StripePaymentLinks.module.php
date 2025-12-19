@@ -1995,6 +1995,26 @@ public function processCheckout(Page $currentPage): void {
 	 * Clean up invalid renewals from all purchases.
 	 * Removes renewals that don't match the purchase's products.
 	 *
+	 * This fixes a bug where renewals from non-subscription invoices were added to
+	 * the first purchase of a user regardless of product matching. This cleanup
+	 * scans all purchases and removes renewals where the scope key doesn't match
+	 * any of the purchase's line item products.
+	 *
+	 * Usage from ProcessWire backend (Setup → API):
+	 * <code>
+	 * $module = $modules->get('StripePaymentLinks');
+	 * $stats = $module->cleanupInvalidRenewals();
+	 * echo "Cleaned: {$stats['cleaned']} invalid renewals\n";
+	 * echo "Checked: {$stats['total_purchases']} purchases in {$stats['total_users']} users\n";
+	 * </code>
+	 *
+	 * Or via CLI/console:
+	 * <code>
+	 * $module = wire('modules')->get('StripePaymentLinks');
+	 * $stats = $module->cleanupInvalidRenewals();
+	 * var_dump($stats);
+	 * </code>
+	 *
 	 * @return array Stats about cleanup [cleaned, total_purchases, total_users]
 	 */
 	public function cleanupInvalidRenewals(): array {
