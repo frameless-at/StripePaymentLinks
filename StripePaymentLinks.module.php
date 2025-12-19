@@ -228,21 +228,9 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			}
 		});
 
-		// Populate debug field with purchase metadata
-		$this->addHookAfter('ProcessPageEdit::buildForm', function(\ProcessWire\HookEvent $event) {
-			$page = $event->object->getPage();
-
-			// Only for user pages with purchases
-			if ($page->template->name !== 'user' || !$page->hasField('spl_purchases')) return;
-
-			// Populate debug field for each purchase
-			foreach ($page->spl_purchases as $item) {
-				if (!$item || !$item->id) continue;
-				if ($item->hasField('purchase_debug')) {
-					$debugData = $this->generateDebugData($item);
-					$item->purchase_debug = $debugData;
-				}
-			}
+		// Add debug viewer for purchase metadata in admin
+		$this->addHookAfter('InputfieldRepeater::renderItem', function(\ProcessWire\HookEvent $event) {
+			$this->addPurchaseDebugToRepeaterItem($event);
 		});
 	}
 	
@@ -296,7 +284,6 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		$repeaterInnerNames = [
 			'purchase_date',
 			'purchase_lines',
-			'purchase_debug',
 		];
 		$productFieldNames = [
 			'allow_multiple_purchases',
@@ -1157,17 +1144,10 @@ public function processCheckout(Page $currentPage): void {
 			'label' => 'Purchase lines',
 			'notes' => 'One line per item: PRODUCT_ID • QTY • PRODUCT_TITLE • TOTAL • PERIOD END (for subscriptions)',
 		]);
-		$purchaseDebug = $ensure('purchase_debug', 'FieldtypeTextarea', [
-			'label' => '🔍 Debug Data',
-			'collapsed' => Inputfield::collapsedYes,
-			'rows' => 20,
-			'contentType' => FieldtypeTextarea::contentTypeJSON,
-		]);
 				
 		$repChanged = false;
 			if(!$repFg->has($purchaseDate))  { $repFg->add($purchaseDate);  $repChanged = true; }
 			if(!$repFg->has($purchaseLines)) { $repFg->add($purchaseLines); $repChanged = true; }
-			if(!$repFg->has($purchaseDebug)) { $repFg->add($purchaseDebug); $repChanged = true; }
 			if($repChanged) $repFg->save();
 
 		if(!$fg->has($purchases)) {
@@ -1887,58 +1867,145 @@ public function processCheckout(Page $currentPage): void {
  }
 
 	/**
-	 * Generates debug data for a purchase item.
+	 * Adds debug viewer directly to purchase repeater item output.
 	 *
-	 * @param \ProcessWire\RepeaterPage $item The purchase item.
-	 * @return string JSON formatted debug data.
+	 * @param \ProcessWire\HookEvent $event The InputfieldRepeater::renderItem event.
+	 * @return void
 	 */
-	protected function generateDebugData(\ProcessWire\RepeaterPage $item): string {
-		$data = [];
+	protected function addPurchaseDebugToRepeaterItem(\ProcessWire\HookEvent $event): void {
+		$inputfield = $event->object;
 
-		// Validation
+		// Only apply to spl_purchases repeater
+		if ($inputfield->name !== 'spl_purchases') return;
+
+		$item = $event->arguments(0); // The repeater page item
+		$out = $event->return; // The rendered HTML
+
+		if (!$item || !$item->id) return;
+
+		// Load CSS once (static flag to prevent multiple loads)
+		static $cssLoaded = false;
+		if (!$cssLoaded) {
+			$out = $this->getPurchaseDebugCSS() . $out;
+			$cssLoaded = true;
+		}
+
+		// Generate debug button and panel
+		$debugButton = $this->renderDebugButton($item);
+		$debugPanel = $this->renderDebugPanel($item);
+
+		// Try multiple injection strategies
+		$injected = false;
+
+		// Strategy 1: Look for </h2> tag (most common in repeater headers)
+		if (strpos($out, '</h2>') !== false) {
+			$out = str_replace(
+				'</h2>',
+				' <span class="spl-debug-btn-wrapper">' . $debugButton . '</span></h2>' . $debugPanel,
+				$out
+			);
+			$injected = true;
+		}
+
+		// Strategy 2: Look for InputfieldHeader class
+		if (!$injected && strpos($out, 'InputfieldHeader') !== false) {
+			$out = preg_replace(
+				'/(<[^>]*class="[^"]*InputfieldHeader[^"]*"[^>]*>.*?)(<\/\w+>)/s',
+				'$1' . ' <span class="spl-debug-btn-wrapper">' . $debugButton . '</span>$2' . $debugPanel,
+				$out,
+				1
+			);
+			$injected = true;
+		}
+
+		// Strategy 3: Fallback - inject at the very beginning of the output
+		if (!$injected) {
+			$out = '<div class="spl-debug-wrapper">' . $debugButton . $debugPanel . '</div>' . $out;
+		}
+
+		$event->return = $out;
+	}
+
+	/**
+	 * Returns inline CSS for debug viewer (loaded once per page).
+	 *
+	 * @return string CSS wrapped in <style> tag.
+	 */
+	protected function getPurchaseDebugCSS(): string {
+		$cssPath = __DIR__ . '/assets/purchase-debug.css';
+		if (!file_exists($cssPath)) return '';
+
+		$css = file_get_contents($cssPath);
+		return '<style>' . $css . '</style>';
+	}
+
+	/**
+	 * Renders the debug button HTML.
+	 *
+	 * @param \ProcessWire\RepeaterPage $item The purchase repeater item.
+	 * @return string HTML for debug button.
+	 */
+	protected function renderDebugButton(\ProcessWire\RepeaterPage $item): string {
+		$id = (int) $item->id;
+		return '<button type="button" class="spl-debug-btn" onclick="splToggleDebug(' . $id . '); return false;" title="Show/Hide Purchase Debug Data">🔍 Debug</button>';
+	}
+
+	/**
+	 * Renders the debug panel HTML.
+	 *
+	 * @param \ProcessWire\RepeaterPage $item The purchase repeater item.
+	 * @return string HTML for debug panel.
+	 */
+	protected function renderDebugPanel(\ProcessWire\RepeaterPage $item): string {
+		$id = (int) $item->id;
+		$metadata = $this->formatPurchaseMetadata($item);
 		$validation = $this->validatePurchaseData($item);
-		$data['validation'] = $validation;
 
-		// Stripe Session
-		$stripeSession = (array) $item->meta('stripe_session');
-		if (!empty($stripeSession)) {
-			$data['stripe_session'] = $stripeSession;
-		}
+		$html = '<div id="spl-debug-panel-' . $id . '" class="spl-debug-panel" style="display:none;">';
 
-		// Product IDs with page titles
-		$productIds = (array) $item->meta('product_ids');
-		if (!empty($productIds)) {
-			$mapped = [];
-			foreach ($productIds as $pid) {
-				$p = $this->wire('pages')->get((int)$pid);
-				$mapped[] = [
-					'id' => (int)$pid,
-					'title' => $p && $p->id ? $p->title : '(not found)',
-				];
+		// Validation section
+		if (!empty($validation)) {
+			$html .= '<div class="spl-debug-validation">';
+			$html .= '<h3>Validation Status</h3>';
+			$html .= '<ul>';
+			foreach ($validation as $msg) {
+				$html .= '<li class="spl-validation-' . htmlspecialchars($msg['type'], ENT_QUOTES, 'UTF-8') . '">';
+				$html .= htmlspecialchars($msg['text'], ENT_QUOTES, 'UTF-8');
+				$html .= '</li>';
 			}
-			$data['product_ids'] = $mapped;
+			$html .= '</ul>';
+			$html .= '</div>';
 		}
 
-		// Period End Map
-		$periodEndMap = (array) $item->meta('period_end_map');
-		if (!empty($periodEndMap)) {
-			$decoded = [];
-			foreach ($periodEndMap as $key => $value) {
-				$decoded[$key] = [
-					'raw' => $value,
-					'decoded' => is_numeric($value) && $value > 0 ? date('Y-m-d H:i:s', (int)$value) : ($value === 1 ? 'flag' : ''),
-				];
-			}
-			$data['period_end_map'] = $decoded;
+		// Metadata section
+		if (!empty($metadata)) {
+			$html .= '<div class="spl-debug-metadata">';
+			$html .= '<h3>Purchase Metadata</h3>';
+			$html .= $metadata;
+			$html .= '</div>';
 		}
 
-		// Renewals
-		$renewals = (array) $item->meta('renewals');
-		if (!empty($renewals)) {
-			$data['renewals'] = $renewals;
+		$html .= '</div>';
+
+		// Add toggle JavaScript inline
+		static $jsAdded = false;
+		if (!$jsAdded) {
+			$html .= '<script>
+function splToggleDebug(id) {
+	var panel = document.getElementById("spl-debug-panel-" + id);
+	if (panel) {
+		if (panel.style.display === "none") {
+			panel.style.display = "block";
+		} else {
+			panel.style.display = "none";
+		}
+	}
+}
+</script>';
+			$jsAdded = true;
 		}
 
-		return json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+		return $html;
 	}
 
 	/**
