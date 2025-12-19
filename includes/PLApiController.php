@@ -677,7 +677,44 @@ private function markCanceledForKeys(\ProcessWire\User $u, array $keys, int $end
 		$purchaseSubId = (string)$sub['id'];
 	  }
 
+	  // CRITICAL: If invoice has a subscription, only match purchases with same subscription
 	  if ($subId && $purchaseSubId !== $subId) continue;
+
+	  // CRITICAL: If invoice has NO subscription, verify products match
+	  if (!$subId) {
+		// Get product IDs from this purchase's line items
+		$purchaseProductIds = [];
+		$lines = $session['line_items']['data'] ?? [];
+		foreach ($lines as $line) {
+		  $stripeProductId = '';
+		  if (isset($line['price']['product'])) {
+			$prod = $line['price']['product'];
+			$stripeProductId = is_object($prod) ? (string)($prod->id ?? '') : (is_array($prod) ? (string)($prod['id'] ?? '') : (string)$prod);
+		  }
+		  if ($stripeProductId) {
+			// Build scope key (same logic as above)
+			$mappedId = 0;
+			$sid = $san->selectorValue($stripeProductId);
+			if ($sid !== '') {
+			  $p = $pages->get("stripe_product_id=$sid");
+			  if ($p && $p->id) $mappedId = (int)$p->id;
+			}
+			$purchaseProductIds[] = $mappedId > 0 ? (string)$mappedId : ('0#' . $stripeProductId);
+		  }
+		}
+
+		// Check if ANY renewal scope key matches this purchase's products
+		$hasMatchingProduct = false;
+		foreach ($renewalsByScope as $scopeKey => $renewal) {
+		  if (in_array($scopeKey, $purchaseProductIds, true)) {
+			$hasMatchingProduct = true;
+			break;
+		  }
+		}
+
+		// If no products match, skip this purchase
+		if (!$hasMatchingProduct) continue;
+	  }
 
 	  // Add renewals to this purchase
 	  $renewals = (array)$purchase->meta('renewals');

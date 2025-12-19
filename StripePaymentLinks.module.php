@@ -1992,6 +1992,74 @@ public function processCheckout(Page $currentPage): void {
 	}
 
 	/**
+	 * Clean up invalid renewals from all purchases.
+	 * Removes renewals that don't match the purchase's products.
+	 *
+	 * @return array Stats about cleanup [cleaned, total_purchases, total_users]
+	 */
+	public function cleanupInvalidRenewals(): array {
+		$stats = ['cleaned' => 0, 'total_purchases' => 0, 'total_users' => 0];
+		$users = $this->wire('users');
+		$pages = $this->wire('pages');
+		$san = $this->wire('sanitizer');
+
+		foreach ($users as $u) {
+			if (!$u->hasField('spl_purchases') || !$u->spl_purchases->count()) continue;
+			$stats['total_users']++;
+
+			foreach ($u->spl_purchases as $purchase) {
+				if (!$purchase || !$purchase->id) continue;
+				$stats['total_purchases']++;
+
+				$renewals = (array)$purchase->meta('renewals');
+				if (empty($renewals)) continue;
+
+				// Get this purchase's product scope keys
+				$session = (array)$purchase->meta('stripe_session');
+				if (!$session) continue;
+
+				$validScopeKeys = [];
+				$lines = $session['line_items']['data'] ?? [];
+				foreach ($lines as $line) {
+					$stripeProductId = '';
+					if (isset($line['price']['product'])) {
+						$prod = $line['price']['product'];
+						$stripeProductId = is_object($prod) ? (string)($prod->id ?? '') : (is_array($prod) ? (string)($prod['id'] ?? '') : (string)$prod);
+					}
+					if ($stripeProductId) {
+						$mappedId = 0;
+						$sid = $san->selectorValue($stripeProductId);
+						if ($sid !== '') {
+							$p = $pages->get("stripe_product_id=$sid");
+							if ($p && $p->id) $mappedId = (int)$p->id;
+						}
+						$validScopeKeys[] = $mappedId > 0 ? (string)$mappedId : ('0#' . $stripeProductId);
+					}
+				}
+
+				// Remove renewals that don't match this purchase's products
+				$cleaned = false;
+				foreach ($renewals as $scopeKey => $renewalList) {
+					if (!in_array($scopeKey, $validScopeKeys, true)) {
+						unset($renewals[$scopeKey]);
+						$cleaned = true;
+						$stats['cleaned']++;
+					}
+				}
+
+				if ($cleaned) {
+					$purchase->of(false);
+					$purchase->meta('renewals', $renewals);
+					$purchase->save(['quiet' => true]);
+					$this->wire('log')->save(self::LOG_PL, "[CLEANUP] Removed invalid renewals from purchase {$purchase->id} (user {$u->id})");
+				}
+			}
+		}
+
+		return $stats;
+	}
+
+	/**
 	 * Validates purchase data and returns status messages.
 	 *
 	 * @param \ProcessWire\RepeaterPage $item The purchase repeater item.
