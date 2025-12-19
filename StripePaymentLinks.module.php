@@ -227,6 +227,11 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 					$this->updateUserAccessAndNotify($page);
 			}
 		});
+
+		// Add debug viewer for purchase metadata in admin
+		$this->addHookAfter('ProcessPageEdit::buildForm', function(\ProcessWire\HookEvent $event) {
+			$this->addPurchaseDebugViewer($event);
+		});
 	}
 	
 	/**
@@ -1860,4 +1865,197 @@ public function processCheckout(Page $currentPage): void {
 
 	 return $results;
  }
+
+	/**
+	 * Adds debug viewer functionality to purchase repeater items in user edit screen.
+	 *
+	 * @param \ProcessWire\HookEvent $event The ProcessPageEdit::buildForm event.
+	 * @return void
+	 */
+	protected function addPurchaseDebugViewer(\ProcessWire\HookEvent $event): void {
+		$process = $event->object;
+		$page = $process->getPage();
+
+		// Only apply to user edit pages
+		if (!$page || $page->template->name !== 'user') return;
+		if (!$page->hasField('spl_purchases')) return;
+
+		// Load assets
+		$config = $this->wire('config');
+		$config->scripts->add($config->urls->siteModules . 'StripePaymentLinks/assets/purchase-debug.js');
+		$config->styles->add($config->urls->siteModules . 'StripePaymentLinks/assets/purchase-debug.css');
+
+		// Add JavaScript data for each purchase item
+		$jsData = [];
+		foreach ($page->spl_purchases as $item) {
+			if (!$item || !$item->id) continue;
+
+			$metadata = $this->formatPurchaseMetadata($item);
+			$validation = $this->validatePurchaseData($item);
+
+			$jsData[$item->id] = [
+				'metadata' => $metadata,
+				'validation' => $validation,
+			];
+		}
+
+		// Inject purchase data as JSON for JavaScript to use
+		if (!empty($jsData)) {
+			$json = json_encode($jsData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+			$script = "<script>var splPurchaseDebugData = {$json};</script>";
+			$config->scripts->add($script);
+		}
+	}
+
+	/**
+	 * Formats purchase metadata for display in the debug viewer.
+	 *
+	 * @param \ProcessWire\RepeaterPage $item The purchase repeater item.
+	 * @return string HTML formatted metadata.
+	 */
+	protected function formatPurchaseMetadata(\ProcessWire\RepeaterPage $item): string {
+		$html = '';
+
+		// Stripe Session
+		$stripeSession = (array) $item->meta('stripe_session');
+		if (!empty($stripeSession)) {
+			$html .= '<div class="spl-debug-section">';
+			$html .= '<h4>Stripe Session</h4>';
+			$html .= '<pre>' . htmlspecialchars(json_encode($stripeSession, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8') . '</pre>';
+			$html .= '</div>';
+		}
+
+		// Product IDs
+		$productIds = (array) $item->meta('product_ids');
+		if (!empty($productIds)) {
+			$html .= '<div class="spl-debug-section">';
+			$html .= '<h4>Product IDs (Mapped)</h4>';
+			$html .= '<ul>';
+			foreach ($productIds as $pid) {
+				$p = $this->wire('pages')->get((int)$pid);
+				if ($p && $p->id) {
+					$html .= '<li><strong>' . (int)$pid . '</strong>: ' . htmlspecialchars($p->title, ENT_QUOTES, 'UTF-8') . '</li>';
+				} else {
+					$html .= '<li><strong>' . (int)$pid . '</strong>: <em>(page not found)</em></li>';
+				}
+			}
+			$html .= '</ul>';
+			$html .= '</div>';
+		}
+
+		// Period End Map
+		$periodEndMap = (array) $item->meta('period_end_map');
+		if (!empty($periodEndMap)) {
+			$html .= '<div class="spl-debug-section">';
+			$html .= '<h4>Period End Map</h4>';
+			$html .= '<table class="spl-debug-table">';
+			$html .= '<thead><tr><th>Scope Key</th><th>Value</th><th>Decoded</th></tr></thead>';
+			$html .= '<tbody>';
+			foreach ($periodEndMap as $key => $value) {
+				$decoded = '';
+				if (is_numeric($value) && $value > 0) {
+					$decoded = date('Y-m-d H:i:s', (int)$value);
+				} elseif ($value === 1) {
+					$decoded = 'Flag (true)';
+				}
+				$html .= '<tr>';
+				$html .= '<td><code>' . htmlspecialchars($key, ENT_QUOTES, 'UTF-8') . '</code></td>';
+				$html .= '<td>' . htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8') . '</td>';
+				$html .= '<td>' . htmlspecialchars($decoded, ENT_QUOTES, 'UTF-8') . '</td>';
+				$html .= '</tr>';
+			}
+			$html .= '</tbody>';
+			$html .= '</table>';
+			$html .= '</div>';
+		}
+
+		// Renewals
+		$renewals = (array) $item->meta('renewals');
+		if (!empty($renewals)) {
+			$html .= '<div class="spl-debug-section">';
+			$html .= '<h4>Renewals</h4>';
+			$html .= '<pre>' . htmlspecialchars(json_encode($renewals, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8') . '</pre>';
+			$html .= '</div>';
+		}
+
+		return $html;
+	}
+
+	/**
+	 * Validates purchase data and returns status messages.
+	 *
+	 * @param \ProcessWire\RepeaterPage $item The purchase repeater item.
+	 * @return array Array of validation messages.
+	 */
+	protected function validatePurchaseData(\ProcessWire\RepeaterPage $item): array {
+		$messages = [];
+		$now = time();
+
+		// Check period_end_map for expired/active subscriptions
+		$periodEndMap = (array) $item->meta('period_end_map');
+		foreach ($periodEndMap as $key => $value) {
+			// Skip flag keys
+			if (strpos($key, '_paused') !== false || strpos($key, '_canceled') !== false) {
+				continue;
+			}
+
+			if (is_numeric($value) && $value > 0) {
+				$timestamp = (int)$value;
+				$date = date('Y-m-d H:i:s', $timestamp);
+
+				if ($timestamp < $now) {
+					$messages[] = [
+						'type' => 'warning',
+						'text' => "Period end for scope '{$key}' is in the past ({$date})"
+					];
+				} else {
+					$messages[] = [
+						'type' => 'success',
+						'text' => "Period end for scope '{$key}' is active until {$date}"
+					];
+				}
+			}
+		}
+
+		// Check for paused subscriptions
+		foreach ($periodEndMap as $key => $value) {
+			if (strpos($key, '_paused') !== false) {
+				$scopeKey = str_replace('_paused', '', $key);
+				$messages[] = [
+					'type' => 'info',
+					'text' => "Scope '{$scopeKey}' is PAUSED"
+				];
+			}
+		}
+
+		// Check for canceled subscriptions
+		foreach ($periodEndMap as $key => $value) {
+			if (strpos($key, '_canceled') !== false) {
+				$scopeKey = str_replace('_canceled', '', $key);
+				$messages[] = [
+					'type' => 'info',
+					'text' => "Scope '{$scopeKey}' is CANCELED"
+				];
+			}
+		}
+
+		// Check if stripe_session exists
+		$stripeSession = (array) $item->meta('stripe_session');
+		if (empty($stripeSession)) {
+			$messages[] = [
+				'type' => 'error',
+				'text' => 'No Stripe session data found'
+			];
+		}
+
+		// If no messages, add a general OK message
+		if (empty($messages)) {
+			$messages[] = [
+				'type' => 'success',
+				'text' => 'Purchase data looks good'
+			];
+		}
+
+		return $messages;
+	}
 }
