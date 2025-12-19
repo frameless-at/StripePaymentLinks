@@ -2,6 +2,19 @@
  * Purchase Debug Viewer Styles
  */
 
+/* Debug Button Wrapper (for fallback positioning) */
+.spl-debug-wrapper {
+	margin-bottom: 10px;
+	padding: 10px;
+	background: #fff3cd;
+	border: 1px solid #ffc107;
+	border-radius: 3px;
+}
+
+.spl-debug-btn-wrapper {
+	margin-left: 10px;
+}
+
 /* Debug Button */
 .spl-debug-btn {
 	display: inline-flex;

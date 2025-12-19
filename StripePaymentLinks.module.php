@@ -1894,13 +1894,34 @@ public function processCheckout(Page $currentPage): void {
 		$debugButton = $this->renderDebugButton($item);
 		$debugPanel = $this->renderDebugPanel($item);
 
-		// Inject button into the header and panel after header
-		// The header usually ends with </h2> or has a class="InputfieldHeader"
-		$out = str_replace(
-			'</h2>',
-			' <span class="spl-debug-btn-wrapper">' . $debugButton . '</span></h2>' . $debugPanel,
-			$out
-		);
+		// Try multiple injection strategies
+		$injected = false;
+
+		// Strategy 1: Look for </h2> tag (most common in repeater headers)
+		if (strpos($out, '</h2>') !== false) {
+			$out = str_replace(
+				'</h2>',
+				' <span class="spl-debug-btn-wrapper">' . $debugButton . '</span></h2>' . $debugPanel,
+				$out
+			);
+			$injected = true;
+		}
+
+		// Strategy 2: Look for InputfieldHeader class
+		if (!$injected && strpos($out, 'InputfieldHeader') !== false) {
+			$out = preg_replace(
+				'/(<[^>]*class="[^"]*InputfieldHeader[^"]*"[^>]*>.*?)(<\/\w+>)/s',
+				'$1' . ' <span class="spl-debug-btn-wrapper">' . $debugButton . '</span>$2' . $debugPanel,
+				$out,
+				1
+			);
+			$injected = true;
+		}
+
+		// Strategy 3: Fallback - inject at the very beginning of the output
+		if (!$injected) {
+			$out = '<div class="spl-debug-wrapper">' . $debugButton . $debugPanel . '</div>' . $out;
+		}
 
 		$event->return = $out;
 	}
