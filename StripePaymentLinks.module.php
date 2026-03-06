@@ -1189,10 +1189,8 @@ public function processCheckout(Page $currentPage): void {
 			$tpl = $templates->get($tplName);
 			if ($tpl && $tpl->id) $productTplIds[] = $tpl->id;
 		}
-		if ($productTplIds) {
-			$freeAccess->template_ids = $productTplIds;
-			$fields->save($freeAccess);
-		}
+		$freeAccess->template_ids = $productTplIds;
+		$fields->save($freeAccess);
 
 		if (!$fg->has($freeAccess)) {
 			$fg->add($freeAccess);
