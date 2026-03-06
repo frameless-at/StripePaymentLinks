@@ -1184,9 +1184,10 @@ public function processCheckout(Page $currentPage): void {
 			if ($tpl && $tpl->id) $productTplIds[] = $tpl->id;
 		}
 		$freeAccess = $ensure('spl_free_access', 'FieldtypePage', [
-			'label'        => 'Free Product Access',
-			'derefAsPage'  => 0, // returns PageArray (multi-select)
-			'inputfield'   => 'InputfieldAsmSelect',
+			'label'          => 'Free Product Access',
+			'derefAsPage'    => 0, // returns PageArray (multi-select)
+			'inputfield'     => 'InputfieldAsmSelect',
+			'labelFieldName' => 'title',
 			'template_ids' => $productTplIds,
 		]);
 
