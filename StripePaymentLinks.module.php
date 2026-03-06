@@ -1181,6 +1181,20 @@ public function processCheckout(Page $currentPage): void {
 			'derefAsPage' => 0, // returns PageArray (multi-select)
 			'inputfield'  => 'InputfieldAsmSelect',
 		]);
+
+		// Restrict selectable pages to configured product templates
+		$productTplNames = array_values(array_filter((array)($this->productTemplateNames ?? [])));
+		$productTplIds = [];
+		foreach ($productTplNames as $tplName) {
+			$tpl = $templates->get($tplName);
+			if ($tpl && $tpl->id) $productTplIds[] = $tpl->id;
+		}
+		if ($productTplIds) {
+			$freeAccess->input_field_template_id  = $productTplIds[0];
+			$freeAccess->Inputfield_template_ids  = implode('|', $productTplIds);
+			$fields->save($freeAccess);
+		}
+
 		if (!$fg->has($freeAccess)) {
 			$fg->add($freeAccess);
 			$fg->save();
