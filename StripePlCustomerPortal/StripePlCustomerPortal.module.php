@@ -711,13 +711,14 @@ public function getPurchasesData(User $user): array {
         ? $deliveryPage->parent
         : $deliveryPage;
 
+      $thumbUrl = $this->productThumbUrl($deliveryPage) ?: $this->productThumbUrl($salesPage);
       $rows[] = [
         'purchase_ts'   => 0,
         'purchase_date' => '',
         'product_id'    => $pid,
         'product_title' => (string) $salesPage->title,
         'product_url'   => $deliveryPage->httpUrl,
-        'thumb_url'     => $this->productThumbUrl($salesPage),
+        'thumb_url'     => $thumbUrl,
         'category'      => (string)($salesPage->get('product_category') ?: $salesPage->template->label ?: $salesPage->template->name),
         'status_key'    => 'active',
         'status_until'  => null,
