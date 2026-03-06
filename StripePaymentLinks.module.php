@@ -291,7 +291,8 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			'access_expires',
 			'reset_token',
 			'reset_expires',
-			'spl_purchases', // Repeater
+			'spl_purchases',    // Repeater
+			'spl_free_access',  // Page selector (free access grants)
 		];
 		$repeaterInnerNames = [
 			'purchase_date',
@@ -391,7 +392,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		}
 	
 		// 4c) Delete user fields if unused
-		foreach (['must_set_password','access_token','access_expires','reset_token','reset_expires'] as $fname) {
+		foreach (['must_set_password','access_token','access_expires','reset_token','reset_expires','spl_free_access'] as $fname) {
 			if (($f = $fields->get($fname)) && $f->id && !$isFieldInUse($f)) {
 				try { $fields->delete($f); } catch (\Throwable $e) {}
 			}
@@ -1173,6 +1174,17 @@ public function processCheckout(Page $currentPage): void {
 			$fg->add($purchases);
 			$fg->save();
 		}
+
+		// spl_free_access: grant product access without a Stripe purchase
+		$freeAccess = $ensure('spl_free_access', 'FieldtypePage', [
+			'label'       => 'Free Product Access',
+			'derefAsPage' => 0, // returns PageArray (multi-select)
+			'inputfield'  => 'InputfieldAsmSelect',
+		]);
+		if (!$fg->has($freeAccess)) {
+			$fg->add($freeAccess);
+			$fg->save();
+		}
 	}
 
 	/**
@@ -1373,8 +1385,16 @@ public function processCheckout(Page $currentPage): void {
 	 *   purchase exists without it → treat as lifetime (one-time) purchase.
 	 */
 	protected function hasActiveAccess(\ProcessWire\User $user, \ProcessWire\Page $product): bool {
+		// Free access granted directly via spl_free_access page selector
+		if ($user->hasField('spl_free_access')) {
+			$freePages = $user->spl_free_access;
+			if ($freePages instanceof \ProcessWire\PageArray && $freePages->has($product)) {
+				return true;
+			}
+		}
+
 		if (!$user->hasField('spl_purchases') || !$user->spl_purchases->count()) return false;
-	
+
 		$pid   = (int) $product->id;
 		$now   = time();
 		$flag  = $pid . '_paused';
