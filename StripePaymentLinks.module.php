@@ -1176,21 +1176,19 @@ public function processCheckout(Page $currentPage): void {
 		}
 
 		// spl_free_access: grant product access without a Stripe purchase
-		$freeAccess = $ensure('spl_free_access', 'FieldtypePage', [
-			'label'       => 'Free Product Access',
-			'derefAsPage' => 0, // returns PageArray (multi-select)
-			'inputfield'  => 'InputfieldAsmSelect',
-		]);
-
-		// Restrict selectable pages to configured product templates
+		// Resolve product template names to IDs for the page-selector restriction
 		$productTplNames = array_values(array_filter((array)($this->productTemplateNames ?? [])));
 		$productTplIds = [];
 		foreach ($productTplNames as $tplName) {
 			$tpl = $templates->get($tplName);
 			if ($tpl && $tpl->id) $productTplIds[] = $tpl->id;
 		}
-		$freeAccess->template_ids = $productTplIds;
-		$fields->save($freeAccess);
+		$freeAccess = $ensure('spl_free_access', 'FieldtypePage', [
+			'label'        => 'Free Product Access',
+			'derefAsPage'  => 0, // returns PageArray (multi-select)
+			'inputfield'   => 'InputfieldAsmSelect',
+			'template_ids' => $productTplIds,
+		]);
 
 		if (!$fg->has($freeAccess)) {
 			$fg->add($freeAccess);
