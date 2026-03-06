@@ -934,6 +934,9 @@ private function extractProductNameFromStripeSession(array $stripeSession, int $
     background:linear-gradient(to top,rgba(0,0,0,.5) 0%,rgba(0,0,0,0) 100%)}
   .spl-card .spl-title{position:absolute;left:0;right:0;bottom:10px;padding:16px 18px;
     text-align:center;color:#fff;font-weight:700;text-shadow:0 1px 2px rgba(0,0,0,.6)}
+  .spl-card.spl-no-img .position-relative{min-height:120px;background:#343a40}
+  .spl-card.spl-no-img .spl-grad{display:none}
+  .spl-card.spl-no-img .spl-title{top:0;bottom:0;display:flex;align-items:center;justify-content:center}
   </style>';
 
     $badge = function(array $r): string {
@@ -948,12 +951,13 @@ private function extractProductNameFromStripeSession(array $stripeSession, int $
     $out = $css;
     foreach ($usable as $r) {
       $title  = htmlspecialchars($r['product_title'], ENT_QUOTES);
-      $imgTag = $r['thumb_url'] ? '<img class="card-img-top" src="' . htmlspecialchars($r['thumb_url'], ENT_QUOTES) . '" alt="">' : '';
-      $anchor = $r['product_url'] ? '<a href="' . htmlspecialchars($r['product_url'], ENT_QUOTES) . '" class="stretched-link"></a>' : '';
+      $imgTag  = $r['thumb_url'] ? '<img class="card-img-top" src="' . htmlspecialchars($r['thumb_url'], ENT_QUOTES) . '" alt="">' : '';
+      $noImg   = $r['thumb_url'] ? '' : ' spl-no-img';
+      $anchor  = $r['product_url'] ? '<a href="' . htmlspecialchars($r['product_url'], ENT_QUOTES) . '" class="stretched-link"></a>' : '';
 
       $out .= '
         <div class="col-12 col-sm-6 col-lg-4">
-          <div class="card spl-card shadow-sm">
+          <div class="card spl-card' . $noImg . ' shadow-sm">
             <div class="position-relative">
               ' . $imgTag . '
               <div class="spl-grad"></div>
@@ -1012,6 +1016,7 @@ private function extractProductNameFromStripeSession(array $stripeSession, int $
     $css = '<style id="spl-gray-cards">
   .spl-card.spl-gray .card-img-top{filter:grayscale(100%);opacity:.9}
   .spl-card.spl-gray:hover .card-img-top{filter:none;opacity:1}
+  .spl-card.spl-gray.spl-no-img .position-relative{background:#6c757d}
   </style>';
 
     $out = $ownedHtml . $css;
@@ -1019,12 +1024,13 @@ private function extractProductNameFromStripeSession(array $stripeSession, int $
     // 5) render unowned cards in gray
     foreach ($unowned as $p) {
       $title = htmlspecialchars((string) $p->title, ENT_QUOTES);
-      $thumb = $this->productThumbUrl($p);
-      $img   = $thumb ? '<img class="card-img-top" src="' . htmlspecialchars($thumb, ENT_QUOTES) . '" alt="">' : '';
+      $thumb  = $this->productThumbUrl($p);
+      $img    = $thumb ? '<img class="card-img-top" src="' . htmlspecialchars($thumb, ENT_QUOTES) . '" alt="">' : '';
+      $noImg  = $thumb ? '' : ' spl-no-img';
 
       $out .= '
         <div class="col-12 col-sm-6 col-lg-4">
-          <div class="card spl-card spl-gray shadow-sm">
+          <div class="card spl-card spl-gray' . $noImg . ' shadow-sm">
             <div class="position-relative">
               ' . $img . '
               <div class="spl-grad"></div>
