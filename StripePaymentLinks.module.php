@@ -213,7 +213,6 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			$this->ensureFields();
 			$this->ensureProductFields($data['productTemplateNames'] ?? null);
 			$this->ensureCustomerRoleExists();
-			$this->ensureLoginDisabledRoleExists();
 			$this->triggerSyncStripeCustomers($data);
 			$this->triggerMagicLinks($data);
 			$this->triggerAccountMerge($data);
@@ -257,7 +256,6 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		$this->ensureFields();
 		$this->ensureProductFields();
 		$this->ensureCustomerRoleExists();
-		$this->ensureLoginDisabledRoleExists();
 	}
 
 
@@ -272,7 +270,6 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		$this->ensureFields();
 		$this->ensureProductFields();
 		$this->ensureCustomerRoleExists();
-		$this->ensureLoginDisabledRoleExists();
 	}
 	
 	/**
@@ -1506,48 +1503,6 @@ public function processCheckout(Page $currentPage): void {
 		}
 	}
 
-	protected function ensureLoginDisabledRoleExists(): void {
-		$roles = $this->wire('roles');
-
-		$role = $roles->get('login-disabled');
-		if (!$role || !$role->id) {
-			try {
-				$role = $roles->add('login-disabled');
-				if (!$role || !$role->id) throw new \Exception('roles->add("login-disabled") failed');
-				$this->wire('log')->save(self::LOG_PL, 'Created role "login-disabled".');
-			} catch (\Throwable $e) {
-				$this->wire('log')->save(self::LOG_PL, 'ensureLoginDisabledRoleExists error: '.$e->getMessage());
-			}
-		}
-
-		$this->ensureLoginDisabledRoleInConfig();
-	}
-
-	protected function ensureLoginDisabledRoleInConfig(): void {
-		$config = $this->wire('config');
-
-		// Bereits konfiguriert?
-		$existing = $config->loginDisabledRoles;
-		if (is_array($existing) && in_array('login-disabled', $existing)) return;
-
-		// config.php lokalisieren
-		$configPath = $config->paths->site . 'config.php';
-		if (!is_writable($configPath)) {
-			$this->wire('log')->save(self::LOG_PL,
-				'ensureLoginDisabledRoleInConfig: ' . $configPath . ' is not writable – please add manually: $config->loginDisabledRoles = [\'login-disabled\'];'
-			);
-			return;
-		}
-
-		$line  = "\n\$config->loginDisabledRoles = ['login-disabled'];\n";
-		$result = file_put_contents($configPath, $line, FILE_APPEND);
-
-		if ($result === false) {
-			$this->wire('log')->save(self::LOG_PL, 'ensureLoginDisabledRoleInConfig: failed to write to ' . $configPath);
-		} else {
-			$this->wire('log')->save(self::LOG_PL, 'ensureLoginDisabledRoleInConfig: $config->loginDisabledRoles set in config.php');
-		}
-	}
 
 	/**
 	 * Ensures a user has the "customer" role, adding it if missing.
@@ -1593,14 +1548,6 @@ public function processCheckout(Page $currentPage): void {
 		$isNewUser = false;
 		/** @var User $buyer */
 		$buyer = $users->get("email=" . $sanitizer->email($email));
-
-		// Reaktiviere deaktivierten Account bei erneutem Kauf
-		if ($buyer && $buyer->id && $buyer->hasRole('login-disabled')) {
-			$buyer->of(false);
-			$buyer->removeRole('login-disabled');
-			$users->save($buyer);
-			$this->wire("log")->save(self::LOG_PL, "[REACTIVATE] User {$email} reactivated after new purchase");
-		}
 
 		if (!$buyer || !$buyer->id) {
 			$isNewUser = true;
@@ -1750,7 +1697,7 @@ public function processCheckout(Page $currentPage): void {
 				$count    = $fromUser->spl_purchases->count();
 				$report[] = "Source account has {$count} purchase(s)";
 				$report[] = "Would transfer all to: {$toEmail}";
-				$report[] = "Source account would be deactivated";
+				$report[] = "Source account would be deleted";
 				$report[] = '';
 				$report[] = "Uncheck 'Test mode' and save again to execute.";
 			}
@@ -2301,10 +2248,9 @@ public function processCheckout(Page $currentPage): void {
 	 *
 	 * @param string $fromEmail Source account email (purchases will be moved FROM here)
 	 * @param string $toEmail   Target account email (purchases will be moved TO here)
-	 * @param bool   $deleteSource Delete source account after merge (default: false = unpublish only)
 	 * @return array{success:bool,message:string,transferred:int}
 	 */
-	public function mergeUserPurchases(string $fromEmail, string $toEmail, bool $deleteSource = false): array {
+	public function mergeUserPurchases(string $fromEmail, string $toEmail): array {
 		$users     = $this->wire('users');
 		$sanitizer = $this->wire('sanitizer');
 
@@ -2338,19 +2284,10 @@ public function processCheckout(Page $currentPage): void {
 			$count++;
 		}
 
-		// Handle source account
-		$fromUser->of(false);
-		if ($deleteSource) {
-			$users->delete($fromUser);
-			$action = "deleted";
-		} else {
-			$fromUser->addRole('login-disabled');
-			$fromUser->save();
-			$action = "disabled";
-		}
+		$users->delete($fromUser);
 
 		$this->wire('log')->save(self::LOG_PL,
-			"[MERGE] {$fromEmail} → {$toEmail} • {$count} purchases transferred • source {$action}"
+			"[MERGE] {$fromEmail} → {$toEmail} • {$count} purchases transferred • source deleted"
 		);
 
 		return [
