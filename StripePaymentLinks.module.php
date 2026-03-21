@@ -1549,9 +1549,9 @@ public function processCheckout(Page $currentPage): void {
 		$buyer = $users->get("email=" . $sanitizer->email($email));
 
 		// Reaktiviere deaktivierten Account bei erneutem Kauf
-		if ($buyer && $buyer->id && $buyer->hasStatus(Page::statusUnpublished)) {
+		if ($buyer && $buyer->id && $buyer->hasRole('login-disabled')) {
 			$buyer->of(false);
-			$buyer->removeStatus(Page::statusUnpublished);
+			$buyer->removeRole('login-disabled');
 			$users->save($buyer);
 			$this->wire("log")->save(self::LOG_PL, "[REACTIVATE] User {$email} reactivated after new purchase");
 		}
@@ -2298,9 +2298,9 @@ public function processCheckout(Page $currentPage): void {
 			$users->delete($fromUser);
 			$action = "deleted";
 		} else {
-			$fromUser->addStatus(Page::statusUnpublished);
+			$fromUser->addRole('login-disabled');
 			$fromUser->save();
-			$action = "unpublished";
+			$action = "disabled";
 		}
 
 		$this->wire('log')->save(self::LOG_PL,
@@ -2309,7 +2309,7 @@ public function processCheckout(Page $currentPage): void {
 
 		return [
 			'success'     => true,
-			'message'     => "Transferred {$count} purchases from {$fromEmail} to {$toEmail}. Source account {$action}.",
+			'message'     => "Transferred {$count} purchase(s) from {$fromEmail} to {$toEmail}. Source account {$action}.",
 			'transferred' => $count,
 		];
 	}
