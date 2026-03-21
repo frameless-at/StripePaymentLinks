@@ -192,8 +192,7 @@ Some customers purchase with different email addresses and end up with multiple 
    - **Target email**: The email address that will receive all purchases.
    - **Test mode**: Simulate the merge without writing anything – shows what would be transferred.
    - **Execute merge**: Activate the checkbox and save to run the actual merge.
-2. The source account is deactivated (unpublished) after a successful merge; it is no longer usable for login.
-3. If the source user later purchases again under the old email address, their account is automatically reactivated and a fresh merge can be triggered.
+2. The source account is deleted after a successful merge.
 
 > **Note:** Always run a test-mode merge first to verify the expected purchases are listed before committing.
 
