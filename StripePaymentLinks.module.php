@@ -2292,7 +2292,7 @@ public function processCheckout(Page $currentPage): void {
 
 		return [
 			'success'     => true,
-			'message'     => "Transferred {$count} purchase(s) from {$fromEmail} to {$toEmail}. Source account {$action}.",
+			'message'     => "Transferred {$count} purchase(s) from {$fromEmail} to {$toEmail}. Source account deleted.",
 			'transferred' => $count,
 		];
 	}
