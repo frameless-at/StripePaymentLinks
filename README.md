@@ -181,6 +181,24 @@ After creating the webhook, copy the **Webhook Signing Secret** from Stripe and 
 
 ---
 
+## Multi-Email Account Merge
+
+Some customers purchase with different email addresses and end up with multiple accounts. The **Account Merge** tool consolidates all purchases from a source account into a target account.
+
+### Usage
+
+1. Open **Module Config** under **Merge User Accounts**:
+   - **Source email**: The email address whose purchases should be transferred (e.g. the old account).
+   - **Target email**: The email address that will receive all purchases.
+   - **Test mode**: Simulate the merge without writing anything – shows what would be transferred.
+   - **Execute merge**: Activate the checkbox and save to run the actual merge.
+2. The source account is deactivated (unpublished) after a successful merge; it is no longer usable for login.
+3. If the source user later purchases again under the old email address, their account is automatically reactivated and a fresh merge can be triggered.
+
+> **Note:** Always run a test-mode merge first to verify the expected purchases are listed before committing.
+
+---
+
 ## Synchronization / Sync Helper
 
 For advanced scenarios (e.g. when purchases were made outside the normal flow, or to backfill history), the module provides a **Sync Helper**:
@@ -250,6 +268,7 @@ This ensures the module’s modals, buttons, and notices render correctly, even 
 
 - ~~Sync helper for syncing older purchases or for controlling reasons~~ since v1.0.7
 - ~~Support for auto handling subscriptions of gated content~~ since v1.0.8
+- ~~Multi-email account merge tool~~ since v1.0.25
 - Optional framework support (UIkit / Tailwind) via JSON view mappings
 - Add more payment providers (Mollie, PayPal, …)
 
