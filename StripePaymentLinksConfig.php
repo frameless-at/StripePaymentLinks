@@ -53,6 +53,12 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			'pl_magic_ttl' => 60,
 			'pl_magic_dry_run' => true,
 			'pl_magic_send' => false,
+
+			// Account Merge
+			'pl_merge_from' => '',
+			'pl_merge_to'   => '',
+			'pl_merge_test' => true,
+			'pl_merge_run'  => false,
 		];
 	}
 
@@ -441,6 +447,68 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			}
 
 		$inputfields->add($fsMagic);
+
+		/** -----------------------
+		 *  Account Merge (consolidate purchases from different emails)
+		 *  ----------------------*/
+		$fsMerge = $this->modules->get('InputfieldFieldset');
+		$fsMerge->label = 'Merge User Accounts';
+		$fsMerge->name  = 'pl_account_merge';
+		$fsMerge->collapsed = Inputfield::collapsedYes;
+		$fsMerge->description = 'Transfer all purchases from one user account to another. Useful when a customer has purchased with different email addresses.';
+
+			/** @var \ProcessWire\InputfieldEmail $fromEmail */
+			$fromEmail = $this->modules->get('InputfieldEmail');
+			$fromEmail->name = 'pl_merge_from';
+			$fromEmail->label = 'Source Email (FROM)';
+			$fromEmail->description = 'Email of the account whose purchases will be transferred.';
+			$fromEmail->notes = 'This account will be deactivated after the merge.';
+			$fromEmail->columnWidth = 50;
+			$fromEmail->placeholder = 'old@email.com';
+			$fsMerge->add($fromEmail);
+
+			/** @var \ProcessWire\InputfieldEmail $toEmail */
+			$toEmail = $this->modules->get('InputfieldEmail');
+			$toEmail->name = 'pl_merge_to';
+			$toEmail->label = 'Target Email (TO)';
+			$toEmail->description = 'Email of the account that will receive all purchases.';
+			$toEmail->notes = 'Customer will use this email to log in.';
+			$toEmail->columnWidth = 50;
+			$toEmail->placeholder = 'new@email.com';
+			$fsMerge->add($toEmail);
+
+			/** @var \ProcessWire\InputfieldCheckbox $test */
+			$test = $this->modules->get('InputfieldCheckbox');
+			$test->name = 'pl_merge_test';
+			$test->label = 'Test mode (no changes)';
+			$test->description = 'Show what would happen without actually merging.';
+			$test->checked = (bool)$this->get('pl_merge_test');
+			$test->columnWidth = 50;
+			$fsMerge->add($test);
+
+			/** @var \ProcessWire\InputfieldCheckbox $run */
+			$run = $this->modules->get('InputfieldCheckbox');
+			$run->name = 'pl_merge_run';
+			$run->label = 'Merge now';
+			$run->description = 'Execute the account merge on save.';
+			$run->notes = 'Always test first!';
+			$run->columnWidth = 50;
+			$fsMerge->add($run);
+
+			$mergeReport = $this->wire('session')->get('pl_merge_report');
+			if ($mergeReport) {
+				/** @var \ProcessWire\InputfieldMarkup $out */
+				$out = $this->modules->get('InputfieldMarkup');
+				$out->name = 'pl_merge_report';
+				$out->label = 'Merge Report';
+				$out->value = '<pre style="white-space:pre-wrap;max-height:400px;overflow:auto;margin:0;background:#f5f5f5;padding:1em;border:1px solid #ddd;border-radius:4px;">'
+							. htmlspecialchars((string)$mergeReport, ENT_QUOTES, 'UTF-8')
+							. '</pre>';
+				$fsMerge->add($out);
+				$this->wire('session')->remove('pl_merge_report');
+			}
+
+		$inputfields->add($fsMerge);
 
 		return $inputfields;
 	}

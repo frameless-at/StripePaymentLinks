@@ -215,6 +215,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			$this->ensureCustomerRoleExists();
 			$this->triggerSyncStripeCustomers($data);
 			$this->triggerMagicLinks($data);
+			$this->triggerAccountMerge($data);
 		});
 		$this->addHookAfter('Pages::saveReady', function(\ProcessWire\HookEvent $event) {
 			$page = $event->arguments(0);
@@ -1546,7 +1547,15 @@ public function processCheckout(Page $currentPage): void {
 		$isNewUser = false;
 		/** @var User $buyer */
 		$buyer = $users->get("email=" . $sanitizer->email($email));
-	
+
+		// Reaktiviere deaktivierten Account bei erneutem Kauf
+		if ($buyer && $buyer->id && $buyer->hasStatus(Page::statusUnpublished)) {
+			$buyer->of(false);
+			$buyer->removeStatus(Page::statusUnpublished);
+			$users->save($buyer);
+			$this->wire("log")->save(self::LOG_PL, "[REACTIVATE] User {$email} reactivated after new purchase");
+		}
+
 		if (!$buyer || !$buyer->id) {
 			$isNewUser = true;
 			$buyer = new User();
@@ -1650,6 +1659,65 @@ public function processCheckout(Page $currentPage): void {
 		}
 
 		$data['pl_magic_send'] = false;
+		$this->modules->saveConfig('StripePaymentLinks', $data);
+	  }
+
+	  /**
+	   * Trigger account merge from config and reset the flag.
+	   *
+	   * @param array $data Saved config values from Modules::saveConfig hook.
+	   * @return void
+	   */
+	  protected function triggerAccountMerge(array $data): void {
+		if (empty($data['pl_merge_run'])) return;
+
+		$fromEmail = trim((string)($data['pl_merge_from'] ?? ''));
+		$toEmail   = trim((string)($data['pl_merge_to'] ?? ''));
+		$testMode  = !empty($data['pl_merge_test']);
+
+		if (!$fromEmail || !$toEmail) {
+			$this->error('Account Merge: Please enter both source and target email addresses.');
+			$data['pl_merge_run'] = false;
+			$this->modules->saveConfig('StripePaymentLinks', $data);
+			return;
+		}
+
+		$report   = [];
+		$report[] = $testMode ? '=== TEST MODE (no changes) ===' : '=== LIVE MERGE ===';
+		$report[] = "From: {$fromEmail}";
+		$report[] = "To: {$toEmail}";
+		$report[] = '';
+
+		if ($testMode) {
+			$users     = $this->wire('users');
+			$sanitizer = $this->wire('sanitizer');
+			$fromUser  = $users->get("email=" . $sanitizer->email($fromEmail));
+			$toUser    = $users->get("email=" . $sanitizer->email($toEmail));
+
+			if (!$fromUser || !$fromUser->id) {
+				$report[] = "ERROR: Source user not found: {$fromEmail}";
+			} elseif (!$toUser || !$toUser->id) {
+				$report[] = "ERROR: Target user not found: {$toEmail}";
+			} elseif ($fromUser->id === $toUser->id) {
+				$report[] = "ERROR: Source and target are the same user";
+			} else {
+				$count    = $fromUser->spl_purchases->count();
+				$report[] = "Source account has {$count} purchase(s)";
+				$report[] = "Would transfer all to: {$toEmail}";
+				$report[] = "Source account would be deactivated";
+				$report[] = '';
+				$report[] = "Uncheck 'Test mode' and save again to execute.";
+			}
+		} else {
+			$result   = $this->mergeUserPurchases($fromEmail, $toEmail);
+			$report[] = $result['message'];
+		}
+
+		$this->wire('session')->set('pl_merge_report', implode("\n", $report));
+
+		$data['pl_merge_run']  = false;
+		$data['pl_merge_from'] = '';
+		$data['pl_merge_to']   = '';
 		$this->modules->saveConfig('StripePaymentLinks', $data);
 	  }
 
@@ -2176,5 +2244,73 @@ public function processCheckout(Page $currentPage): void {
 		}
 
 		return $messages;
+	}
+
+	/**
+	 * Merge purchases from one user account into another.
+	 *
+	 * Use case: Customer purchased with email A, wants access via email B.
+	 * Can also be called programmatically:
+	 *   $modules->get('StripePaymentLinks')->mergeUserPurchases('old@email.com', 'new@email.com');
+	 *
+	 * @param string $fromEmail Source account email (purchases will be moved FROM here)
+	 * @param string $toEmail   Target account email (purchases will be moved TO here)
+	 * @param bool   $deleteSource Delete source account after merge (default: false = unpublish only)
+	 * @return array{success:bool,message:string,transferred:int}
+	 */
+	public function mergeUserPurchases(string $fromEmail, string $toEmail, bool $deleteSource = false): array {
+		$users     = $this->wire('users');
+		$sanitizer = $this->wire('sanitizer');
+
+		$fromUser = $users->get("email=" . $sanitizer->email($fromEmail));
+		$toUser   = $users->get("email=" . $sanitizer->email($toEmail));
+
+		if (!$fromUser || !$fromUser->id) {
+			return ['success' => false, 'message' => "Source user not found: {$fromEmail}", 'transferred' => 0];
+		}
+		if (!$toUser || !$toUser->id) {
+			return ['success' => false, 'message' => "Target user not found: {$toEmail}", 'transferred' => 0];
+		}
+		if ($fromUser->id === $toUser->id) {
+			return ['success' => false, 'message' => "Source and target are the same user", 'transferred' => 0];
+		}
+
+		$count = 0;
+		$toUser->of(false);
+
+		foreach ($fromUser->spl_purchases as $purchase) {
+			$newItem = $toUser->spl_purchases->getNew();
+			$newItem->purchase_date  = $purchase->purchase_date;
+			$newItem->purchase_lines = $purchase->purchase_lines;
+			$toUser->spl_purchases->add($newItem);
+			$toUser->save('spl_purchases');
+
+			// Transfer all metadata
+			$newItem->meta('product_ids',    $purchase->meta('product_ids'));
+			$newItem->meta('stripe_session', $purchase->meta('stripe_session'));
+			$newItem->meta('period_end_map', $purchase->meta('period_end_map'));
+			$count++;
+		}
+
+		// Handle source account
+		$fromUser->of(false);
+		if ($deleteSource) {
+			$users->delete($fromUser);
+			$action = "deleted";
+		} else {
+			$fromUser->addStatus(Page::statusUnpublished);
+			$fromUser->save();
+			$action = "unpublished";
+		}
+
+		$this->wire('log')->save(self::LOG_PL,
+			"[MERGE] {$fromEmail} → {$toEmail} • {$count} purchases transferred • source {$action}"
+		);
+
+		return [
+			'success'     => true,
+			'message'     => "Transferred {$count} purchases from {$fromEmail} to {$toEmail}. Source account {$action}.",
+			'transferred' => $count,
+		];
 	}
 }
