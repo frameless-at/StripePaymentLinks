@@ -1859,11 +1859,11 @@ public function processCheckout(Page $currentPage): void {
 			 continue;
 		 }
 
-		 // Filter products user actually owns
-		 $ownedProducts = array_filter($products, fn($p) => $this->hasPurchasedProduct($u, $p));
+		 // Filter products user has access to (via purchase or manually granted free access)
+		 $ownedProducts = array_filter($products, fn($p) => $this->hasActiveAccess($u, $p) || $this->hasPurchasedProduct($u, $p));
 
 		 if (empty($ownedProducts)) {
-			 $results['log'][] = "SKIP  • {$addr} • Owns none of the selected products";
+			 $results['log'][] = "SKIP  • {$addr} • Has no access to any of the selected products";
 			 $results['skipped']++;
 			 continue;
 		 }
