@@ -268,6 +268,9 @@ This ensures the module’s modals, buttons, and notices render correctly, even 
 
 - ~~Sync helper for syncing older purchases or for controlling reasons~~ since v1.0.7
 - ~~Support for auto handling subscriptions of gated content~~ since v1.0.8
+- ~~Sending magic links for already purchased products to customers~~ since v1.0.14
+- ~~Support for multiple webhooks~~ since v1.0.19
+- ~~Grant users free product access~~ since v1.0.23
 - ~~Multi-email account merge tool~~ since v1.0.25
 - Optional framework support (UIkit / Tailwind) via JSON view mappings
 - Add more payment providers (Mollie, PayPal, …)
