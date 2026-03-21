@@ -213,6 +213,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			$this->ensureFields();
 			$this->ensureProductFields($data['productTemplateNames'] ?? null);
 			$this->ensureCustomerRoleExists();
+			$this->ensureLoginDisabledRoleExists();
 			$this->triggerSyncStripeCustomers($data);
 			$this->triggerMagicLinks($data);
 			$this->triggerAccountMerge($data);
@@ -256,6 +257,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		$this->ensureFields();
 		$this->ensureProductFields();
 		$this->ensureCustomerRoleExists();
+		$this->ensureLoginDisabledRoleExists();
 	}
 
 
@@ -270,6 +272,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		$this->ensureFields();
 		$this->ensureProductFields();
 		$this->ensureCustomerRoleExists();
+		$this->ensureLoginDisabledRoleExists();
 	}
 	
 	/**
@@ -1503,6 +1506,21 @@ public function processCheckout(Page $currentPage): void {
 		}
 	}
 
+	protected function ensureLoginDisabledRoleExists(): void {
+		$roles = $this->wire('roles');
+
+		$role = $roles->get('login-disabled');
+		if ($role && $role->id) return;
+
+		try {
+			$role = $roles->add('login-disabled');
+			if (!$role || !$role->id) throw new \Exception('roles->add("login-disabled") failed');
+			$this->wire('log')->save(self::LOG_PL, 'Created role "login-disabled".');
+		} catch (\Throwable $e) {
+			$this->wire('log')->save(self::LOG_PL, 'ensureLoginDisabledRoleExists error: '.$e->getMessage());
+		}
+	}
+
 	/**
 	 * Ensures a user has the "customer" role, adding it if missing.
 	 *
@@ -1549,9 +1567,9 @@ public function processCheckout(Page $currentPage): void {
 		$buyer = $users->get("email=" . $sanitizer->email($email));
 
 		// Reaktiviere deaktivierten Account bei erneutem Kauf
-		if ($buyer && $buyer->id && $buyer->hasStatus(Page::statusUnpublished)) {
+		if ($buyer && $buyer->id && $buyer->hasRole('login-disabled')) {
 			$buyer->of(false);
-			$buyer->removeStatus(Page::statusUnpublished);
+			$buyer->removeRole('login-disabled');
 			$users->save($buyer);
 			$this->wire("log")->save(self::LOG_PL, "[REACTIVATE] User {$email} reactivated after new purchase");
 		}
@@ -2298,9 +2316,9 @@ public function processCheckout(Page $currentPage): void {
 			$users->delete($fromUser);
 			$action = "deleted";
 		} else {
-			$fromUser->addStatus(Page::statusUnpublished);
+			$fromUser->addRole('login-disabled');
 			$fromUser->save();
-			$action = "unpublished";
+			$action = "disabled";
 		}
 
 		$this->wire('log')->save(self::LOG_PL,
