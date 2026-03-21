@@ -462,7 +462,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			$fromEmail->name = 'pl_merge_from';
 			$fromEmail->label = 'Source Email (FROM)';
 			$fromEmail->description = 'Email of the account whose purchases will be transferred.';
-			$fromEmail->notes = 'This account will be deactivated after the merge.';
+			$fromEmail->notes = 'This account will be deleted after the merge.';
 			$fromEmail->columnWidth = 50;
 			$fromEmail->placeholder = 'old@email.com';
 			$fsMerge->add($fromEmail);
