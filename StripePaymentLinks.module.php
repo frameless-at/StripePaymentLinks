@@ -1510,14 +1510,42 @@ public function processCheckout(Page $currentPage): void {
 		$roles = $this->wire('roles');
 
 		$role = $roles->get('login-disabled');
-		if ($role && $role->id) return;
+		if (!$role || !$role->id) {
+			try {
+				$role = $roles->add('login-disabled');
+				if (!$role || !$role->id) throw new \Exception('roles->add("login-disabled") failed');
+				$this->wire('log')->save(self::LOG_PL, 'Created role "login-disabled".');
+			} catch (\Throwable $e) {
+				$this->wire('log')->save(self::LOG_PL, 'ensureLoginDisabledRoleExists error: '.$e->getMessage());
+			}
+		}
 
-		try {
-			$role = $roles->add('login-disabled');
-			if (!$role || !$role->id) throw new \Exception('roles->add("login-disabled") failed');
-			$this->wire('log')->save(self::LOG_PL, 'Created role "login-disabled".');
-		} catch (\Throwable $e) {
-			$this->wire('log')->save(self::LOG_PL, 'ensureLoginDisabledRoleExists error: '.$e->getMessage());
+		$this->ensureLoginDisabledRoleInConfig();
+	}
+
+	protected function ensureLoginDisabledRoleInConfig(): void {
+		$config = $this->wire('config');
+
+		// Bereits konfiguriert?
+		$existing = $config->loginDisabledRoles;
+		if (is_array($existing) && in_array('login-disabled', $existing)) return;
+
+		// config.php lokalisieren
+		$configPath = $config->paths->site . 'config.php';
+		if (!is_writable($configPath)) {
+			$this->wire('log')->save(self::LOG_PL,
+				'ensureLoginDisabledRoleInConfig: ' . $configPath . ' is not writable – please add manually: $config->loginDisabledRoles = [\'login-disabled\'];'
+			);
+			return;
+		}
+
+		$line  = "\n\$config->loginDisabledRoles = ['login-disabled'];\n";
+		$result = file_put_contents($configPath, $line, FILE_APPEND);
+
+		if ($result === false) {
+			$this->wire('log')->save(self::LOG_PL, 'ensureLoginDisabledRoleInConfig: failed to write to ' . $configPath);
+		} else {
+			$this->wire('log')->save(self::LOG_PL, 'ensureLoginDisabledRoleInConfig: $config->loginDisabledRoles set in config.php');
 		}
 	}
 
