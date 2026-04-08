@@ -37,6 +37,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			'version'     => '1.0.25',
 			'summary'     => 'Stripe payment-link redirects, user/purchases, magic link, mails, modals.',
 			'author'      => 'frameless Media',
+			'href'        => 'https://github.com/frameless-at/StripePaymentLinks',
 			'autoload'    => true,
 			'singular'    => true,
 			'icon'        => 'credit-card',
