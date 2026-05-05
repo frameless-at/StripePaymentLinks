@@ -142,22 +142,22 @@ class PLMailService extends Wire {
 	 * - X-Priority: explicitly Normal (some PHPMailer setups emit "null")
 	 */
 	private function applyDeliverabilityHeaders($m, StripePaymentLinks $mod): void {
+		if (!method_exists($m, 'header')) return;
+
 		$replyTo = trim((string)($mod->mailReplyTo ?? ''));
 		if ($replyTo === '') {
 			$replyTo = trim((string)($mod->wire('config')->adminEmail ?? ''));
 		}
-		if ($replyTo !== '' && method_exists($m, 'replyTo')) {
-			try { $m->replyTo($replyTo); } catch (\Throwable $e) { /* ignore */ }
-		} elseif ($replyTo !== '' && method_exists($m, 'header')) {
-			try { $m->header('Reply-To', $replyTo); } catch (\Throwable $e) { /* ignore */ }
-		}
-		if (method_exists($m, 'header')) {
-			try {
-				$m->header('Auto-Submitted', 'auto-generated');
-				$m->header('X-Auto-Response-Suppress', 'All');
-				$m->header('X-Priority', '3');
-			} catch (\Throwable $e) { /* ignore */ }
-		}
+		try {
+			if ($replyTo !== '') {
+				// Set via header() rather than replyTo() — survives all WireMail
+				// backends; replyTo() is silently dropped by some implementations.
+				$m->header('Reply-To', $replyTo);
+			}
+			$m->header('Auto-Submitted', 'auto-generated');
+			$m->header('X-Auto-Response-Suppress', 'All');
+			$m->header('X-Priority', '3');
+		} catch (\Throwable $e) { /* ignore */ }
 	}
 	
 	/* =====================================================================
