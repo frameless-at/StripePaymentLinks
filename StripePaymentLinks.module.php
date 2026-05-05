@@ -257,6 +257,18 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			$this->wire('log')->save(self::LOG_MAIL, 'layout.html.php missing in module (includes/mail); using minimal HTML fallback.');
 		}
 
+		// PagePaths core module hooks Pages::added and calls Page::localPath(),
+		// which only exists when LanguageSupportPageNames is installed. On a
+		// single-language site without that module, creating any new page —
+		// including the on-demand parent for a freshly added repeater field —
+		// crashes with "Method Page::localPath does not exist". Register a
+		// fallback so localPath simply returns Page::path.
+		if (!$this->wire('modules')->isInstalled('LanguageSupportPageNames')) {
+			$this->addHookMethod('Page::localPath', function(\ProcessWire\HookEvent $e) {
+				$e->return = $e->object->path();
+			});
+		}
+
 		// Inject Bootstrap (CSS/JS) early into <head> to avoid FOUC
 		$this->addHookAfter('Page::render', function(\ProcessWire\HookEvent $e) {
 			$html = (string)$e->return;
