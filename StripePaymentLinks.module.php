@@ -281,7 +281,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			$this->ensureProductFields($data['productTemplateNames'] ?? null);
 			$this->ensureCustomerRoleExists();
 			$this->ensureWithdrawalFields();
-			$this->ensureWithdrawalPages();
+			$this->cleanupLegacyWithdrawalPages();
 			$this->triggerSyncStripeCustomers($data);
 			$this->triggerMagicLinks($data);
 			$this->triggerAccountMerge($data);
