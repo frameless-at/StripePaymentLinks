@@ -37,6 +37,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			'brandColor'             => '#0d6efd',
 			'mailHeaderName'         => (string)($cfg->siteName ?? ''),
 			'mailSignatureName'      => (string)($cfg->siteName ?? ''),
+			'mailExtraNote'          => '',
 			
 			// Sync Helper
 			'pl_sync_dry_run' => true,
@@ -216,6 +217,15 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		$sig->columnWidth = 33;
 		$sig->attr('value', (string)$this->get('mailSignatureName'));
 		$fsMail->add($sig);
+
+		// Extra note (e.g. legal disclaimer like waiver of right of withdrawal)
+		$extra = $this->modules->get('InputfieldTextarea');
+		$extra->name  = 'mailExtraNote';
+		$extra->label = 'Additional mail note (optional)';
+		$extra->notes = 'Shown in the access mail above the footer. Plain text; line breaks are preserved. Useful for legal notices like "Verzicht auf das Rücktrittsrecht".';
+		$extra->attr('rows', 4);
+		$extra->attr('value', (string)$this->get('mailExtraNote'));
+		$fsMail->add($extra);
 
 		$inputfields->add($fsMail);
 		

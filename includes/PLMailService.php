@@ -42,6 +42,7 @@ class PLMailService extends Wire {
 				fn($l) => ['title' => (string)($l['title'] ?? ''), 'url' => (string)($l['url'] ?? '#')],
 				array_slice($links, 1)
 			) : [],
+			'extraNote'     => trim((string)($mod->mailExtraNote ?? '')),
 		];
 		$p = $mod->wire('pages')->get((int)$links[0]['id']);
 		if ($p && $p->hasField('access_mail_addon_txt')) {
@@ -60,7 +61,11 @@ class PLMailService extends Wire {
 		);
 		$m->subject(($mod->subjectPrefix ?? '') . strtr($mod->t($isMulti ? 'mail.multi.subject' : 'mail.single.subject'), $repl));
 		$m->bodyHTML($html);
-		$m->body(strtr("{$vars['leadText']}\n\n{$vars['productUrl']}\n\n{$vars['closingText']}\n{$vars['signatureName']}\n", $repl));
+		$plain = "{$vars['leadText']}\n\n{$vars['productUrl']}\n\n{$vars['closingText']}\n{$vars['signatureName']}\n";
+		if ($vars['extraNote'] !== '') {
+			$plain .= "\n" . $vars['extraNote'] . "\n";
+		}
+		$m->body(strtr($plain, $repl));
 		$this->applyDeliverabilityHeaders($m, $mod);
 
 		try {

@@ -191,6 +191,15 @@ $showInfo = $has('productUrl') || $has('infoLabel') || $has('closingText') || $h
 		  </tr>
 		  <?php endif; ?>
 
+		  <!-- Extra note (e.g. legal disclaimer / waiver of right of withdrawal) -->
+		  <?php if ($has('extraNote')): ?>
+		  <tr>
+			<td class="px" style="padding:0 22px 18px 22px;font-size:13px;color:#6b7280;line-height:1.5;">
+			  <?= nl2br($esc($val('extraNote'))) ?>
+			</td>
+		  </tr>
+		  <?php endif; ?>
+
 		  <!-- Footer note -->
 		  <?php if ($has('footerNote')): ?>
 		  <tr>
