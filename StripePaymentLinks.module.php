@@ -68,16 +68,16 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	private function defaultTexts(): array {
 	  return [
 		// ===== MAIL: summary (1..n products) =====
-		'mail.single.subject'        => $this->_('Your access'),
+		'mail.single.subject'        => $this->_('Your access to “{title}”'),
 		'mail.single.preheader'      => $this->_('You now have access to “{title}”.'),
 		'mail.single.body'           => $this->_('You now have access to “{title}”.'),
-		'mail.single.cta'            => $this->_('Start now'),
+		'mail.single.cta'            => $this->_('Open “{title}”'),
 		'mail.single.title'          => $this->_(''),
 
-		'mail.multi.subject'         => $this->_('Your accesses'),
+		'mail.multi.subject'         => $this->_('Your access to {list}'),
 		'mail.multi.preheader'       => $this->_('You unlocked multiple online products: {list}.'),
 		'mail.multi.body'            => $this->_('You unlocked multiple online products: {list}.'),
-		'mail.multi.cta'             => $this->_('Start now'),
+		'mail.multi.cta'             => $this->_('Open your products'),
 		'mail.multi.title'           => $this->_(''),
 
 		// Common mail elements
@@ -836,7 +836,7 @@ public function processCheckout(Page $currentPage): void {
 				 $token = $this->createAccessToken($buyer, $ttlMinutes * 60);
 			   }
 			   $glue = (strpos($url, '?') === false) ? '?' : '&';
-			   $url .= $glue . 'access=' . urlencode($token);
+			   $url .= $glue . 't=' . urlencode($token);
 			 }
 			 $links[] = ['title' => (string)$p->title, 'url' => $url, 'id' => (int)$p->id];
 		   }
@@ -883,12 +883,14 @@ public function processCheckout(Page $currentPage): void {
 		$users   = $this->wire('users');
 		$user    = $this->wire('user');
 
-		$token = $input->get->text('access');
+		// Accept new ?t= as well as legacy ?access= (for already-sent mails)
+		$token = $input->get->text('t');
+		if (!$token) $token = $input->get->text('access');
 		if (!$token) return;
 
 		if ($user->isLoggedin()) return;
 
-		if (strlen($token) < 40) {
+		if (strlen($token) < 30) {
 			$this->wire('log')->save(self::LOG_SEC, 'Received obviously invalid access token '.$token);
 			$this->modal()->queueExpiredAccessModal();
 			return;
@@ -1582,12 +1584,22 @@ public function processCheckout(Page $currentPage): void {
 	 * @return string The generated access token.
 	 */
 	protected function createAccessToken(User $user, int $ttlSeconds): string {
-		$token = bin2hex(random_bytes(32));
+		$token = $this->generateAccessToken();
 		$user->of(false);
 		if ($user->hasField('access_token'))   $user->access_token   = $token;
 		if ($user->hasField('access_expires')) $user->access_expires = time() + max(60, $ttlSeconds);
 		$this->wire('users')->save($user, ['quiet' => true]);
 		return $token;
+	}
+
+	/**
+	 * Generate a URL-safe access token. Shorter and less phishing-pattern-like
+	 * than a 64-char hex string, while keeping ~192 bits of entropy.
+	 *
+	 * @return string 32 chars from the base64url alphabet (A-Z, a-z, 0-9, -, _).
+	 */
+	protected function generateAccessToken(): string {
+		return rtrim(strtr(base64_encode(random_bytes(24)), '+/', '-_'), '=');
 	}
 
 	 /**
@@ -1831,7 +1843,7 @@ public function processCheckout(Page $currentPage): void {
 				   try {
 					   $token = $this->createAccessToken($u, max(60, $ttlMinutes * 60));
 					   $glue  = (strpos($url, '?') === false) ? '?' : '&';
-					   $url  .= $glue . 'access=' . urlencode($token);
+					   $url  .= $glue . 't=' . urlencode($token);
 				   } catch (\Throwable $e) {
 					   $this->wire('log')->save(self::LOG_PL, '[updateUserAccessAndNotify] Error: '.$e->getMessage());
 				   }
@@ -1931,7 +1943,7 @@ public function processCheckout(Page $currentPage): void {
 		 }
 
 		 // Generate ONE token for this user
-		 $token = bin2hex(random_bytes(32));
+		 $token = $this->generateAccessToken();
 		 $u->of(false);
 		 if ($u->hasField('access_token'))   $u->access_token   = $token;
 		 if ($u->hasField('access_expires')) $u->access_expires = time() + max(60, $ttlMinutes * 60);
@@ -1940,7 +1952,7 @@ public function processCheckout(Page $currentPage): void {
 		 // Build links for all owned products - re-index with array_values to ensure [0], [1], etc.
 		 $linksPayload = array_values(array_map(fn($p) => [
 			 'title' => (string)$p->title,
-			 'url'   => $p->httpUrl . (strpos($p->httpUrl, '?') === false ? '?' : '&') . 'access=' . urlencode($token),
+			 'url'   => $p->httpUrl . (strpos($p->httpUrl, '?') === false ? '?' : '&') . 't=' . urlencode($token),
 			 'id'    => (int)$p->id
 		 ], $ownedProducts));
 

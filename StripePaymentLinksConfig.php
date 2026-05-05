@@ -32,6 +32,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			'logoUrl'                => '',
 			'mailFromEmail'          => (string)($cfg->adminEmail ?? ('no-reply@' . ($cfg->httpHost ?? 'localhost'))),
 			'mailFromName'           => (string)($cfg->siteName ?? 'Website'),
+			'mailReplyTo'            => (string)($cfg->adminEmail ?? ''),
 			'subjectPrefix'          => '',
 			'brandColor'             => '#0d6efd',
 			'mailHeaderName'         => (string)($cfg->siteName ?? ''),
@@ -174,6 +175,15 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		$fromName->columnWidth = 33;
 		$fromName->attr('value', (string)$this->get('mailFromName'));
 		$fsMail->add($fromName);
+
+		// Reply-To
+		$replyTo = $this->modules->get('InputfieldEmail');
+		$replyTo->name  = 'mailReplyTo';
+		$replyTo->label = 'Reply-To address';
+		$replyTo->columnWidth = 33;
+		$replyTo->notes = 'Recommended when sender uses no-reply@. Improves deliverability.';
+		$replyTo->attr('value', (string)$this->get('mailReplyTo'));
+		$fsMail->add($replyTo);
 
 		// Subject prefix
 		$subj = $this->modules->get('InputfieldText');

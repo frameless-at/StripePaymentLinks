@@ -146,11 +146,11 @@ $showInfo = $has('productUrl') || $has('infoLabel') || $has('closingText') || $h
 			  <?php endif; ?>
 
 			  <?php if ($has('productUrl')): ?>
-			  <p style="margin:0 0 0 0;word-break:break-all;">
+			  <div style="margin:0;">
 				<?= $esc($directLabel) ?>:
 				<a href="<?= $esc($val('productUrl')) ?>"
-				   style="color:<?= $esc($brandColor) ?>;text-decoration:underline;"><?= $esc($val('productUrl')) ?></a>
-			  </p>
+				   style="color:<?= $esc($brandColor) ?>;text-decoration:underline;"><?= $esc($has('ctaText') ? $val('ctaText') : $val('productTitle')) ?></a>
+			  </div>
 			  <?php endif; ?>
 
 			  <?php if ($has('closingText') || $has('signatureName')): ?>

@@ -24,7 +24,7 @@ class PLMailService extends Wire {
 			'firstname'     => $this->displayName($user),
 			'productTitle'  => $repl['{title}'],
 			'productUrl'    => (string)($links[0]['url'] ?? '#'),
-			'ctaText'       => $mod->t($isMulti ? 'mail.multi.cta' : 'mail.single.cta'),
+			'ctaText'       => strtr($mod->t($isMulti ? 'mail.multi.cta' : 'mail.single.cta'), $repl),
 			'leadText'      => strtr($mod->t($isMulti ? 'mail.multi.body' : 'mail.single.body'), $repl),
 			'logoUrl'       => (string)($mod->logoUrl ?? ''),
 			'brandColor'    => (string)($mod->brandColor ?? '#7d0a3d'),
@@ -61,7 +61,8 @@ class PLMailService extends Wire {
 		$m->subject(($mod->subjectPrefix ?? '') . strtr($mod->t($isMulti ? 'mail.multi.subject' : 'mail.single.subject'), $repl));
 		$m->bodyHTML($html);
 		$m->body(strtr("{$vars['leadText']}\n\n{$vars['productUrl']}\n\n{$vars['closingText']}\n{$vars['signatureName']}\n", $repl));
-	
+		$this->applyDeliverabilityHeaders($m, $mod);
+
 		try {
 			$sent = (bool)$m->send();
 			if ($sent) {
@@ -114,7 +115,8 @@ class PLMailService extends Wire {
 	
 		$m->bodyHTML($html);
 		$m->body($vars['leadText'] . "\n\n" . $resetUrl);
-	
+		$this->applyDeliverabilityHeaders($m, $mod);
+
 		try {
 			$sent = (bool)$m->send();
 			if ($sent) {
@@ -130,6 +132,32 @@ class PLMailService extends Wire {
 	/** Hookable: last-chance override of mail variables */
 	protected function ___alterAccessMailVars(array $vars, StripePaymentLinks $mod, User $user, array $links): array{
 		return $vars;
+	}
+
+	/**
+	 * Apply transactional/deliverability headers shared by all module mails.
+	 * - Reply-To: avoids the "noreply@ without Reply-To" red flag for filters
+	 * - Auto-Submitted (RFC 3834): correctly identifies automated mail
+	 * - X-Auto-Response-Suppress: prevents OOO loops
+	 * - X-Priority: explicitly Normal (some PHPMailer setups emit "null")
+	 */
+	private function applyDeliverabilityHeaders($m, StripePaymentLinks $mod): void {
+		$replyTo = trim((string)($mod->mailReplyTo ?? ''));
+		if ($replyTo === '') {
+			$replyTo = trim((string)($mod->wire('config')->adminEmail ?? ''));
+		}
+		if ($replyTo !== '' && method_exists($m, 'replyTo')) {
+			try { $m->replyTo($replyTo); } catch (\Throwable $e) { /* ignore */ }
+		} elseif ($replyTo !== '' && method_exists($m, 'header')) {
+			try { $m->header('Reply-To', $replyTo); } catch (\Throwable $e) { /* ignore */ }
+		}
+		if (method_exists($m, 'header')) {
+			try {
+				$m->header('Auto-Submitted', 'auto-generated');
+				$m->header('X-Auto-Response-Suppress', 'All');
+				$m->header('X-Priority', '3');
+			} catch (\Throwable $e) { /* ignore */ }
+		}
 	}
 	
 	/* =====================================================================
