@@ -277,6 +277,8 @@ final class PLWithdrawalService extends Wire
 			} catch (\Throwable $e) {
 				$mod->wire('log')->save(StripePaymentLinks::LOG_PL,
 					'[WITHDRAWAL] repeater append error: ' . $e->getMessage()
+					. ' @ ' . $e->getFile() . ':' . $e->getLine()
+					. "\n" . $e->getTraceAsString()
 				);
 			}
 		}
@@ -336,10 +338,8 @@ final class PLWithdrawalService extends Wire
 	{
 		$user->of(false);
 		$item = $user->spl_withdrawals->getNew();
-		$user->spl_withdrawals->add($item);
-		$user->save('spl_withdrawals');
-
 		$item->of(false);
+
 		$item->spl_withdrawal_name        = $pending['name']       ?? '';
 		$item->spl_withdrawal_email       = $pending['email']      ?? '';
 		$item->spl_withdrawal_order_id    = $pending['order_id']   ?? '';
@@ -357,7 +357,10 @@ final class PLWithdrawalService extends Wire
 		if ($linkedId > 0) {
 			$item->spl_withdrawal_linked_purchase_id = $linkedId;
 		}
-		$item->save();
+
+		$user->spl_withdrawals->add($item);
+		$this->mod->wire('users')->save($user);
+
 		return $item;
 	}
 
