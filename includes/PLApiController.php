@@ -422,6 +422,18 @@ final class PLApiController {
 	  return;
 	}
 
+	// ----------------- WITHDRAWAL: init -----------------
+	if ($op === 'withdrawal_init') {
+	  $this->mod->withdrawal()->handleInit($event);
+	  return;
+	}
+
+	// ----------------- WITHDRAWAL: submit ---------------
+	if ($op === 'withdrawal_submit') {
+	  $this->mod->withdrawal()->handleSubmit($event);
+	  return;
+	}
+
 	// Fallback for unknown actions
 	$event->return = $json(['ok' => false, 'error' => $this->mod->t('api.unknown_action')]);
   }

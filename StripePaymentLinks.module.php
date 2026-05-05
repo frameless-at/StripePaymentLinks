@@ -34,7 +34,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	public static function getModuleInfo(): array {
 		return [
 			'title'       => 'StripePaymentLinks',
-			'version'     => '1.0.25',
+			'version'     => '1.0.26',
 			'summary'     => 'Stripe payment-link redirects, user/purchases, magic link, mails, modals.',
 			'author'      => 'frameless Media',
 			'href'        => 'https://github.com/frameless-at/StripePaymentLinks',
@@ -55,9 +55,10 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	public const LOG_SEC  = 'security';
 
 	/** Services (lazy) */
-	private ?PLMailService   $mailService  = null;
-	private ?PLModalService  $modalService = null;
-	private ?PLApiController $apiService   = null;
+	private ?PLMailService       $mailService       = null;
+	private ?PLModalService      $modalService      = null;
+	private ?PLApiController     $apiService        = null;
+	private ?PLWithdrawalService $withdrawalService = null;
 
 	/**
 	 * Returns the default internationalized texts used throughout the module.
@@ -173,6 +174,69 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		// ===== JS/AJAX error texts =====
 		'ui.ajax.error_generic'     => $this->_('Error'),
 		'ui.ajax.error_server'      => $this->_('Server error.'),
+
+		// ===== WITHDRAWAL: form (step 1) =====
+		'withdrawal.form.title'           => $this->_('Withdraw contract'),
+		'withdrawal.form.intro'           => $this->_('You can declare your withdrawal of a distance contract here. Please identify the contract you want to withdraw from.'),
+		'withdrawal.form.submit'          => $this->_('Continue'),
+
+		// ===== WITHDRAWAL: confirm (step 2) =====
+		'withdrawal.confirm.title'        => $this->_('Confirm withdrawal'),
+		'withdrawal.confirm.intro'        => $this->_('Please review your data and confirm your withdrawal.'),
+		'withdrawal.confirm.checkbox'     => $this->_('I hereby confirm my withdrawal.'),
+		'withdrawal.confirm.submit'       => $this->_('Confirm withdrawal'),
+		'withdrawal.confirm.back'         => $this->_('Back'),
+		'withdrawal.confirm.label_name'   => $this->_('Name'),
+		'withdrawal.confirm.label_email'  => $this->_('Email'),
+		'withdrawal.confirm.label_order'  => $this->_('Order no.'),
+		'withdrawal.confirm.label_date'   => $this->_('Order date'),
+		'withdrawal.confirm.label_product'=> $this->_('Product'),
+		'withdrawal.confirm.label_reason' => $this->_('Reason'),
+
+		// ===== WITHDRAWAL: success (step 3) =====
+		'withdrawal.success.title'        => $this->_('Withdrawal received'),
+		'withdrawal.success.message'      => $this->_('Thank you. We have received your withdrawal and sent you a confirmation by email. We will reply within 5 business days.'),
+
+		// ===== WITHDRAWAL: form fields =====
+		'withdrawal.field.name'           => $this->_('Your name'),
+		'withdrawal.field.email'          => $this->_('Email'),
+		'withdrawal.field.email_help'     => $this->_('We will send the receipt confirmation to this address.'),
+		'withdrawal.field.order_id'       => $this->_('Order number / Stripe Session ID'),
+		'withdrawal.field.order_date'     => $this->_('Order date'),
+		'withdrawal.field.either_or_help' => $this->_('Please provide either an order number or the order date.'),
+		'withdrawal.field.product'        => $this->_('Product'),
+		'withdrawal.field.reason'         => $this->_('Reason (optional)'),
+		'withdrawal.field.reason_help'    => $this->_('You are not legally required to give a reason.'),
+
+		// ===== WITHDRAWAL: GDPR / privacy =====
+		'withdrawal.privacy.notice'       => $this->_('Your data will be processed only to handle your withdrawal (legal basis: Art. 6(1)(c) GDPR). For details see our privacy policy.'),
+		'withdrawal.privacy.link_label'   => $this->_('Privacy policy'),
+
+		// ===== WITHDRAWAL: error messages =====
+		'withdrawal.error.required'       => $this->_('Please fill in all required fields.'),
+		'withdrawal.error.either_or'      => $this->_('Please provide either an order number or the order date.'),
+		'withdrawal.error.email_invalid'  => $this->_('Please enter a valid email address.'),
+		'withdrawal.error.session_expired'=> $this->_('Your session has expired. Please start again.'),
+		'withdrawal.error.confirm_required'=> $this->_('Please confirm your withdrawal by checking the box.'),
+		'withdrawal.error.rate_limited'   => $this->_('Too many submissions. Please try again later.'),
+		'withdrawal.error.generic'        => $this->_('We could not process your request. Please try again.'),
+
+		// ===== WITHDRAWAL: receipt mail (to consumer) =====
+		'withdrawal.mail.receipt.subject'    => $this->_('Receipt of your withdrawal'),
+		'withdrawal.mail.receipt.preheader'  => $this->_('We received your withdrawal declaration.'),
+		'withdrawal.mail.receipt.headline'   => $this->_('Withdrawal received'),
+		'withdrawal.mail.receipt.body'       => $this->_("Hello {name},\n\nwe have received your withdrawal of the following contract:\n\n  Product:     {product}\n  Order no.:   {order_id}\n  Order date:  {order_date}\n\nReceived on:   {received_at}\n\nWe will review your withdrawal and reply within 5 business days with the next steps.\n\nThis email serves as your confirmation of receipt on a durable medium pursuant to § 13a Abs 4 FAGG.\n\nIf you have questions, please reply to this email."),
+		'withdrawal.mail.receipt.closing'    => $this->_('Best regards'),
+		'withdrawal.mail.receipt.tagline'    => $this->_('Withdrawal'),
+
+		// ===== WITHDRAWAL: admin notification mail =====
+		'withdrawal.mail.admin.subject'      => $this->_('New withdrawal received: {product}'),
+		'withdrawal.mail.admin.headline'     => $this->_('New withdrawal'),
+		'withdrawal.mail.admin.body'         => $this->_("A new withdrawal declaration has arrived.\n\n  Name:        {name}\n  Email:       {email}\n  Product:     {product}\n  Order no.:   {order_id}\n  Order date:  {order_date}\n  Reason:      {reason}\n  User:        {user_status}"),
+
+		// ===== WITHDRAWAL: API responses =====
+		'withdrawal.api.init.ok'             => $this->_('Please confirm your withdrawal on the next page.'),
+		'withdrawal.api.submit.ok'           => $this->_('Your withdrawal has been recorded.'),
 	  ];
 	}
 
@@ -214,6 +278,8 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			$this->ensureFields();
 			$this->ensureProductFields($data['productTemplateNames'] ?? null);
 			$this->ensureCustomerRoleExists();
+			$this->ensureWithdrawalFields();
+			$this->ensureWithdrawalPages();
 			$this->triggerSyncStripeCustomers($data);
 			$this->triggerMagicLinks($data);
 			$this->triggerAccountMerge($data);
@@ -257,6 +323,8 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		$this->ensureFields();
 		$this->ensureProductFields();
 		$this->ensureCustomerRoleExists();
+		$this->ensureWithdrawalFields();
+		$this->ensureWithdrawalPages();
 	}
 
 
@@ -271,6 +339,8 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		$this->ensureFields();
 		$this->ensureProductFields();
 		$this->ensureCustomerRoleExists();
+		$this->ensureWithdrawalFields();
+		$this->ensureWithdrawalPages();
 	}
 	
 	/**
@@ -413,15 +483,74 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 
 			$plLog = $logsPath . DIRECTORY_SEPARATOR . self::LOG_PL . '.txt';
 			if (is_file($plLog)) @unlink($plLog);
-			
+
 			$mailLog = $logsPath . DIRECTORY_SEPARATOR . self::LOG_MAIL . '.txt';
 			if (is_file($mailLog)) @unlink($mailLog);
-			
+
 			$secLog = $logsPath . DIRECTORY_SEPARATOR . self::LOG_SEC . '.txt';
 			if (is_file($secLog)) @unlink($secLog);
 
 		} catch (\Throwable $e) {}
-	
+
+		// 6) Withdrawal feature cleanup
+		try {
+			$pagesApi = $this->wire('pages');
+
+			// 6a) Frontend pages
+			foreach (['/withdrawal/confirm/', '/withdrawal/'] as $path) {
+				$p = $pagesApi->get($path);
+				if ($p && $p->id) {
+					try { $pagesApi->delete($p, true); } catch (\Throwable $e) {}
+				}
+			}
+
+			// 6b) Repeater on user template
+			$userTpl = $templates->get('user');
+			$withdrawals = $fields->get('spl_withdrawals');
+			if ($userTpl && $userTpl->id && $withdrawals && $withdrawals->id) {
+				$ufg = $userTpl->fieldgroup;
+				if ($ufg->has($withdrawals)) {
+					$ufg->remove($withdrawals);
+					try { $ufg->save(); } catch (\Throwable $e) {}
+				}
+			}
+			if ($withdrawals && $withdrawals->id) {
+				foreach ($templates as $t) {
+					/** @var \ProcessWire\Template $t */
+					if ($t->fieldgroup && $t->fieldgroup->has($withdrawals)) {
+						$tfg = $t->fieldgroup;
+						$tfg->remove($withdrawals);
+						try { $tfg->save(); } catch (\Throwable $e) {}
+					}
+				}
+				try { $fields->delete($withdrawals); } catch (\Throwable $e) {}
+			}
+
+			// 6c) Sub-fields (delete only if unused elsewhere)
+			$withdrawalSubFields = [
+				'spl_withdrawal_name',
+				'spl_withdrawal_email',
+				'spl_withdrawal_order_id',
+				'spl_withdrawal_order_date',
+				'spl_withdrawal_product',
+				'spl_withdrawal_reason',
+				'spl_withdrawal_received_at',
+				'spl_withdrawal_ip_hash',
+				'spl_withdrawal_status',
+				'spl_withdrawal_confirmation_sent',
+				'spl_withdrawal_confirmation_sent_at',
+				'spl_withdrawal_linked_purchase_id',
+				'spl_withdrawal_admin_notes',
+			];
+			foreach ($withdrawalSubFields as $fname) {
+				if (($f = $fields->get($fname)) && $f->id && !$isFieldInUse($f)) {
+					try { $fields->delete($f); } catch (\Throwable $e) {}
+				}
+			}
+		} catch (\Throwable $e) {
+			$this->wire('log')->save(self::LOG_PL, '[UNINSTALL] Withdrawal cleanup error: ' . $e->getMessage());
+		}
+
 		// Done
 	}
 	
@@ -463,9 +592,14 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	 * @return string Rendered HTML for modals, access blocks, and scripts.
 	 */
 	public function render(Page $currentPage): string{
+		// Withdrawal flow takes precedence — no checkout/access logic on these pages
+		if ($this->isWithdrawalPage($currentPage)) {
+			return $this->withdrawal()->renderForPage($currentPage);
+		}
+
 		$this->processCheckout($currentPage);
 		$this->handleAccessParam();
-	
+
 		$u       = $this->wire('user');
 		$session = $this->wire('session');
 		$input   = $this->wire('input');
@@ -1007,7 +1141,32 @@ public function processCheckout(Page $currentPage): void {
 		if (!$this->apiService) { require_once __DIR__ . '/includes/PLApiController.php'; $this->apiService = new PLApiController($this); }
 		return $this->apiService;
 	}
-	
+
+	/**
+	 * Returns a lazily-loaded PLWithdrawalService instance.
+	 *
+	 * @return PLWithdrawalService
+	 */
+	public function withdrawal(): PLWithdrawalService {
+		if (!$this->withdrawalService) { require_once __DIR__ . '/includes/PLWithdrawalService.php'; $this->withdrawalService = new PLWithdrawalService($this); }
+		return $this->withdrawalService;
+	}
+
+	/**
+	 * Returns true if the given page is part of the withdrawal flow.
+	 *
+	 * @param Page $page
+	 * @return bool
+	 */
+	public function isWithdrawalPage(Page $page): bool {
+		if (!$page || !$page->id) return false;
+		if ($page->name === 'withdrawal' && $page->parent && $page->parent->id === 1) return true;
+		if ($page->name === 'confirm' && $page->parent && $page->parent->name === 'withdrawal'
+		    && $page->parent->parent && $page->parent->parent->id === 1) return true;
+		return false;
+	}
+
+
 	// In class StripePaymentLinks (irgendwo bei den public-Helpers)
 	public function mapStripeProductToPageId(string $stripeProductId): ?int {
 		if ($stripeProductId === '') return null;
@@ -1482,6 +1641,126 @@ public function processCheckout(Page $currentPage): void {
 	 *
 	 * @return void
 	 */
+	protected function ensureWithdrawalFields(): void {
+		$fields    = $this->wire('fields');
+		$templates = $this->wire('templates');
+		$modules   = $this->wire('modules');
+
+		$userTpl = $templates->get('user');
+		if (!$userTpl || !$userTpl->id) return;
+
+		$ensure = function(string $name, string $typeClass, array $props = []) use ($fields, $modules): \ProcessWire\Field {
+			$f = $fields->get($name);
+			if (!$f || !$f->id) {
+				$f = new \ProcessWire\Field();
+				$f->name = $name;
+				$type = $modules->get($typeClass);
+				if (!$type) $type = $modules->get('FieldtypeText');
+				$f->type = $type;
+			}
+			foreach ($props as $k => $v) $f->$k = $v;
+			$fields->save($f);
+			return $f;
+		};
+
+		// Repeater on user template
+		$withdrawals = $ensure('spl_withdrawals', 'FieldtypeRepeater', ['label' => 'Withdrawals']);
+		/** @var \ProcessWire\Template $repTpl */
+		$repTpl = $withdrawals->type->getRepeaterTemplate($withdrawals);
+		$repFg  = $repTpl->fieldgroup;
+
+		// Sub-fields with spl_withdrawal_ prefix
+		$fName    = $ensure('spl_withdrawal_name',                 'FieldtypeText',     ['label' => 'Consumer name', 'columnWidth' => 50]);
+		$fEmail   = $ensure('spl_withdrawal_email',                'FieldtypeEmail',    ['label' => 'Consumer email', 'columnWidth' => 50]);
+		$fOrderId = $ensure('spl_withdrawal_order_id',             'FieldtypeText',     ['label' => 'Order ID / Stripe Session ID', 'columnWidth' => 50]);
+		$fOrderDt = $ensure('spl_withdrawal_order_date',           'FieldtypeDatetime', ['label' => 'Order date', 'columnWidth' => 50]);
+		$fProduct = $ensure('spl_withdrawal_product',              'FieldtypeText',     ['label' => 'Product']);
+		$fReason  = $ensure('spl_withdrawal_reason',               'FieldtypeTextarea', ['label' => 'Reason (optional)', 'rows' => 4]);
+		$fRecvd   = $ensure('spl_withdrawal_received_at',          'FieldtypeDatetime', ['label' => 'Received at', 'columnWidth' => 50]);
+		$fIpHash  = $ensure('spl_withdrawal_ip_hash',              'FieldtypeText',     ['label' => 'IP hash (HMAC-SHA-256)', 'columnWidth' => 50]);
+
+		$fStatus  = $ensure('spl_withdrawal_status', 'FieldtypeOptions', [
+			'label' => 'Status', 'columnWidth' => 50, 'inputfieldClass' => 'InputfieldSelect',
+		]);
+		if ($fStatus && $fStatus->id && $fStatus->type instanceof \ProcessWire\FieldtypeOptions) {
+			$fStatus->type->manager->setOptionsString($fStatus,
+				"received|Received\nverified-valid|Verified valid\nverified-invalid|Verified invalid\ncompleted|Completed",
+				true
+			);
+		}
+
+		$fConfSent   = $ensure('spl_withdrawal_confirmation_sent',     'FieldtypeCheckbox', ['label' => 'Receipt confirmation sent', 'columnWidth' => 50]);
+		$fConfSentAt = $ensure('spl_withdrawal_confirmation_sent_at',  'FieldtypeDatetime', ['label' => 'Receipt confirmation sent at', 'columnWidth' => 50]);
+		$fLinked     = $ensure('spl_withdrawal_linked_purchase_id',    'FieldtypeInteger',  ['label' => 'Linked purchase ID', 'columnWidth' => 50]);
+		$fAdmNotes   = $ensure('spl_withdrawal_admin_notes',           'FieldtypeTextarea', ['label' => 'Admin notes', 'rows' => 4]);
+
+		$repChanged = false;
+		foreach ([$fName, $fEmail, $fOrderId, $fOrderDt, $fProduct, $fReason, $fRecvd, $fIpHash, $fStatus, $fConfSent, $fConfSentAt, $fLinked, $fAdmNotes] as $f) {
+			if (!$repFg->has($f)) { $repFg->add($f); $repChanged = true; }
+		}
+		if ($repChanged) $repFg->save();
+
+		$userFg = $userTpl->fieldgroup;
+		if (!$userFg->has($withdrawals)) {
+			$userFg->add($withdrawals);
+			$userFg->save();
+		}
+	}
+
+	/**
+	 * Ensures /withdrawal/ and /withdrawal/confirm/ pages exist with the configured template.
+	 * If withdrawalPageTemplate is empty, no pages are created.
+	 *
+	 * @return void
+	 */
+	protected function ensureWithdrawalPages(): void {
+		$pages     = $this->wire('pages');
+		$templates = $this->wire('templates');
+
+		$tplName = trim((string) ($this->withdrawalPageTemplate ?? ''));
+		if ($tplName === '') return;
+
+		$tpl = $templates->get($tplName);
+		if (!$tpl || !$tpl->id) {
+			$this->wire('log')->save(self::LOG_PL, '[WITHDRAWAL] Configured page template not found: ' . $tplName);
+			return;
+		}
+
+		$root = $pages->get('/');
+
+		// /withdrawal/
+		$withdrawal = $pages->get("name=withdrawal, parent={$root->id}, include=all");
+		if (!$withdrawal || !$withdrawal->id) {
+			$withdrawal = new \ProcessWire\Page();
+			$withdrawal->template = $tpl;
+			$withdrawal->parent   = $root;
+			$withdrawal->name     = 'withdrawal';
+			$withdrawal->title    = $this->_('Withdraw contract');
+			$pages->save($withdrawal);
+			$this->wire('log')->save(self::LOG_PL, '[WITHDRAWAL] Created /withdrawal/');
+		} elseif ($withdrawal->template && $withdrawal->template->id !== $tpl->id) {
+			$withdrawal->of(false);
+			$withdrawal->template = $tpl;
+			$pages->save($withdrawal);
+		}
+
+		// /withdrawal/confirm/
+		$confirm = $pages->get("name=confirm, parent={$withdrawal->id}, include=all");
+		if (!$confirm || !$confirm->id) {
+			$confirm = new \ProcessWire\Page();
+			$confirm->template = $tpl;
+			$confirm->parent   = $withdrawal;
+			$confirm->name     = 'confirm';
+			$confirm->title    = $this->_('Confirm withdrawal');
+			$pages->save($confirm);
+			$this->wire('log')->save(self::LOG_PL, '[WITHDRAWAL] Created /withdrawal/confirm/');
+		} elseif ($confirm->template && $confirm->template->id !== $tpl->id) {
+			$confirm->of(false);
+			$confirm->template = $tpl;
+			$pages->save($confirm);
+		}
+	}
+
 	protected function ensureCustomerRoleExists(): void {
 		$roles       = $this->wire('roles');
 		$permissions = $this->wire('permissions');

@@ -220,6 +220,54 @@ This makes it easy to audit or re-import purchases safely.
 
 ---
 
+## Withdrawal / Right of Withdrawal (FAGG / EU 2023/2673)
+
+The module ships an electronic withdrawal function ("Vertrag widerrufen")
+required for B2C distance contracts in Austria/EU effective June 19, 2026.
+
+### What the module does
+
+- Adds a repeater `spl_withdrawals` to the user template (with 13
+  `spl_withdrawal_*` sub-fields). The companion module **StripePlAdmin**
+  reads/manages these entries.
+- Auto-creates `/withdrawal/` and `/withdrawal/confirm/` pages with the
+  template selected in module config (`withdrawalPageTemplate`).
+- Renders a two-step form (form → explicit confirmation step → submit).
+- On submit:
+  - if the entered email matches an existing user → appends a new
+    `spl_withdrawals` repeater item;
+  - if no user matches → no repeater item is created, but the admin still
+    gets the notification mail;
+  - in both cases, a receipt confirmation mail is sent to the consumer
+    (durable medium per § 13a Abs 4 FAGG) and an internal notification
+    mail is sent to the admin.
+- Withdrawals are reachable without login.
+- HMAC-SHA-256 IP hash (peppered with `$config->userAuthSalt`), CSRF,
+  honeypot, rate-limit (3 per IP per hour, 30 min session TTL).
+
+Refund and any subscription cancellation are handled manually by the
+admin in the Stripe dashboard.
+
+### Setup
+
+1. In module config: select the **Page template** for the withdrawal
+   pages (typically the same wrapper template you use for other
+   content pages). Until set, no pages are created.
+2. Optionally set an **Internal notification email** (defaults to
+   `$config->adminEmail`).
+3. In your theme footer, add the legally required link:
+
+   ```html
+   <a href="/withdrawal/">Vertrag widerrufen</a>
+   ```
+
+The existing `$modules->get('StripePaymentLinks')->render($page);` call
+in your theme automatically renders the withdrawal flow on the
+`/withdrawal/` and `/withdrawal/confirm/` pages — no extra integration
+needed.
+
+---
+
 ## Configuration
 
 - **Stripe Secret API Key**
@@ -271,6 +319,7 @@ This ensures the module’s modals, buttons, and notices render correctly, even 
 - ~~Support for multiple webhooks~~ since v1.0.19
 - ~~Grant users free product access~~ since v1.0.23
 - ~~Multi-email account merge tool~~ since v1.0.25
+- ~~Electronic withdrawal function per EU Directive 2023/2673 / § 13a FAGG~~ since v1.0.26
 - Optional framework support (UIkit / Tailwind) via JSON view mappings
 - Add more payment providers (Mollie, PayPal, …)
 

@@ -59,6 +59,10 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			'pl_merge_to'   => '',
 			'pl_merge_test' => true,
 			'pl_merge_run'  => false,
+
+			// Withdrawal (FAGG / EU 2023/2673)
+			'withdrawalPageTemplate'      => '',
+			'withdrawalNotificationEmail' => '',
 		];
 	}
 
@@ -509,6 +513,41 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			}
 
 		$inputfields->add($fsMerge);
+
+		/** -----------------------
+		 *  Withdrawal (FAGG / EU 2023/2673)
+		 *  ----------------------*/
+		$fsW = $this->modules->get('InputfieldFieldset');
+		$fsW->label = 'Withdrawal (FAGG / EU 2023/2673)';
+		$fsW->name  = 'pl_withdrawal';
+		$fsW->collapsed = Inputfield::collapsedYes;
+		$fsW->description = 'Electronic withdrawal function ("Vertrag widerrufen") for B2C distance contracts. Effective June 19, 2026. Once the page template is set, /withdrawal/ and /withdrawal/confirm/ are auto-created on the next save.';
+
+			/** @var \ProcessWire\InputfieldSelect $tplSel */
+			$tplSel = $this->modules->get('InputfieldSelect');
+			$tplSel->name  = 'withdrawalPageTemplate';
+			$tplSel->label = 'Page template for /withdrawal/ pages';
+			$tplSel->description = 'Pages /withdrawal/ and /withdrawal/confirm/ will be created with this template. Empty = no auto-creation.';
+			$tplSel->notes = 'Choose a frontend template that wraps content via your usual layout (e.g. basic-page).';
+			$tplSel->columnWidth = 50;
+			$tplSel->addOption('', '— none —');
+			foreach ($this->templates->find("flags!=system") as $t) {
+				$tplSel->addOption($t->name, $t->name);
+			}
+			$tplSel->attr('value', (string) $this->get('withdrawalPageTemplate'));
+			$fsW->add($tplSel);
+
+			/** @var \ProcessWire\InputfieldEmail $notify */
+			$notify = $this->modules->get('InputfieldEmail');
+			$notify->name  = 'withdrawalNotificationEmail';
+			$notify->label = 'Internal notification email';
+			$notify->description = 'Receives an internal notification on each new withdrawal.';
+			$notify->notes = 'Empty = falls back to $config->adminEmail.';
+			$notify->columnWidth = 50;
+			$notify->attr('value', (string) $this->get('withdrawalNotificationEmail'));
+			$fsW->add($notify);
+
+		$inputfields->add($fsW);
 
 		return $inputfields;
 	}
