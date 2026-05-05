@@ -204,11 +204,41 @@ class PLMailService extends Wire {
 			$u = htmlspecialchars((string)($vars['productUrl'] ?? '#'),   ENT_QUOTES, 'UTF-8');
 			$c = htmlspecialchars((string)($vars['ctaText'] ?? 'Open'),   ENT_QUOTES, 'UTF-8');
 			$lead = htmlspecialchars((string)($vars['leadText'] ?? ''),   ENT_QUOTES, 'UTF-8');
-			return "<p>{$lead}</p><p><a href=\"{$u}\">{$c}</a></p>";
+			return $this->absolutizeUrls("<p>{$lead}</p><p><a href=\"{$u}\">{$c}</a></p>");
 		}
 		extract($vars, EXTR_SKIP);
 		ob_start();
 		include $file;
-		return (string) ob_get_clean();
+		return $this->absolutizeUrls((string) ob_get_clean());
+	}
+
+	/**
+	 * Rewrite root-relative href URLs (e.g. "/agb/") to absolute URLs based on
+	 * $config->urls->httpRoot. Leaves http(s)://, //, mailto:, tel:, # and
+	 * non-root-relative paths untouched. Only acts on href attributes.
+	 *
+	 * Public for unit-testability in isolation.
+	 */
+	public function absolutizeUrls(string $html): string
+	{
+		$config = wire('config');
+		$base = '';
+		if ($config) {
+			if (isset($config->urls) && (string)($config->urls->httpRoot ?? '') !== '') {
+				$base = (string)$config->urls->httpRoot;
+			} else {
+				$scheme = !empty($config->https) ? 'https' : 'http';
+				$host   = (string)($config->httpHost ?? '');
+				if ($host !== '') $base = $scheme . '://' . $host . '/';
+			}
+		}
+		if ($base === '') return $html;
+		$base = rtrim($base, '/');
+
+		return preg_replace_callback(
+			'/\bhref=(["\'])(\/[^\/"\'][^"\']*)\1/i',
+			fn($m) => 'href=' . $m[1] . $base . $m[2] . $m[1],
+			$html
+		);
 	}
 }
