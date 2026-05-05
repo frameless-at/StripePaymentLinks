@@ -63,7 +63,7 @@ class PLMailService extends Wire {
 		$m->bodyHTML($html);
 		$plain = "{$vars['leadText']}\n\n{$vars['productUrl']}\n\n{$vars['closingText']}\n{$vars['signatureName']}\n";
 		if ($vars['extraNote'] !== '') {
-			$plain .= "\n" . $vars['extraNote'] . "\n";
+			$plain .= "\n" . $this->plainTextFromMaybeHtml($vars['extraNote']) . "\n";
 		}
 		$m->body(strtr($plain, $repl));
 		$this->applyDeliverabilityHeaders($m, $mod);
@@ -137,6 +137,21 @@ class PLMailService extends Wire {
 	/** Hookable: last-chance override of mail variables */
 	protected function ___alterAccessMailVars(array $vars, StripePaymentLinks $mod, User $user, array $links): array{
 		return $vars;
+	}
+
+	/**
+	 * Convert a possibly-HTML string (TinyMCE input) to readable plain text
+	 * for the text/plain part of the mail. Plain input is returned unchanged.
+	 */
+	private function plainTextFromMaybeHtml(string $s): string {
+		if (strpos($s, '<') === false) return $s;
+		$s = preg_replace('/<\s*br\s*\/?>/i', "\n", $s);
+		$s = preg_replace('/<\/(p|div|li|tr|h[1-6])\s*>/i', "\n\n", $s);
+		$s = strip_tags($s);
+		$s = html_entity_decode($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+		$s = preg_replace("/[ \t]+/", ' ', $s);
+		$s = preg_replace("/\n{3,}/", "\n\n", $s);
+		return trim($s);
 	}
 
 	/**

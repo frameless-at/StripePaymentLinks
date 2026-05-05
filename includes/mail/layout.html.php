@@ -195,7 +195,15 @@ $showInfo = $has('productUrl') || $has('infoLabel') || $has('closingText') || $h
 		  <?php if ($has('extraNote')): ?>
 		  <tr>
 			<td class="px" style="padding:0 22px 18px 22px;font-size:13px;color:#6b7280;line-height:1.5;">
-			  <?= nl2br($esc($val('extraNote'))) ?>
+			  <?php
+				$__note = (string)$val('extraNote');
+				// If TinyMCE/HTML content, render raw; if plain text, escape and preserve line breaks.
+				if (strpos($__note, '<') !== false) {
+				  echo $__note;
+				} else {
+				  echo nl2br($esc($__note));
+				}
+			  ?>
 			</td>
 		  </tr>
 		  <?php endif; ?>

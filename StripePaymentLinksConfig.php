@@ -219,11 +219,17 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		$fsMail->add($sig);
 
 		// Extra note (e.g. legal disclaimer like waiver of right of withdrawal)
-		$extra = $this->modules->get('InputfieldTextarea');
+		$extra = null;
+		if ($this->modules->isInstalled('InputfieldTinyMCE')) {
+			$extra = $this->modules->get('InputfieldTinyMCE');
+		}
+		if (!$extra) {
+			$extra = $this->modules->get('InputfieldTextarea');
+		}
 		$extra->name  = 'mailExtraNote';
 		$extra->label = 'Additional mail note (optional)';
-		$extra->notes = 'Shown in the access mail above the footer. Plain text; line breaks are preserved. Useful for legal notices like "Verzicht auf das Rücktrittsrecht".';
-		$extra->attr('rows', 4);
+		$extra->notes = 'Shown in the access mail above the footer. Basic formatting (bold, lists, links) is allowed and rendered in the HTML mail; for the plain-text part it is auto-stripped. Useful for legal notices like "Verzicht auf das Rücktrittsrecht".';
+		$extra->attr('rows', 6);
 		$extra->attr('value', (string)$this->get('mailExtraNote'));
 		$fsMail->add($extra);
 
