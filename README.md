@@ -255,12 +255,17 @@ admin in the Stripe dashboard.
 
 1. Optionally set **Internal notification email** in the module config
    (defaults to `$config->adminEmail`).
-2. In your theme footer, add the legally required trigger link:
+2. In your theme footer, render the legally required trigger link:
 
-   ```html
-   <a href="#" data-bs-toggle="modal" data-bs-target="#withdrawalFormModal">
-     Vertrag widerrufen
-   </a>
+   ```php
+   echo $modules->get('StripePaymentLinks')->renderWithdrawalLink();
+   ```
+
+   Optional CSS class / custom label:
+
+   ```php
+   echo $modules->get('StripePaymentLinks')->renderWithdrawalLink('nav-link fw-bold');
+   echo $modules->get('StripePaymentLinks')->renderWithdrawalLink('', 'Widerruf');
    ```
 
 That's it. The existing `$modules->get('StripePaymentLinks')->render($page);`

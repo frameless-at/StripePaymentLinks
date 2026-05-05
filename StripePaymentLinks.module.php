@@ -1155,6 +1155,21 @@ public function processCheckout(Page $currentPage): void {
 		return $this->withdrawalService;
 	}
 
+	/**
+	 * Renders the legally required "Vertrag widerrufen" footer link
+	 * that triggers the withdrawal modal flow.
+	 *
+	 * @param string $cssClass Optional extra CSS classes for the <a> element.
+	 * @param string $label    Optional custom link label (overrides the translation).
+	 * @return string HTML <a> element.
+	 */
+	public function renderWithdrawalLink(string $cssClass = '', string $label = ''): string {
+		$h = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
+		$text = $label !== '' ? $label : $this->t('withdrawal.form.open');
+		$cls  = trim($cssClass) !== '' ? ' class="' . $h($cssClass) . '"' : '';
+		return '<a href="#"' . $cls . ' data-bs-toggle="modal" data-bs-target="#withdrawalFormModal">' . $h($text) . '</a>';
+	}
+
 
 	// In class StripePaymentLinks (irgendwo bei den public-Helpers)
 	public function mapStripeProductToPageId(string $stripeProductId): ?int {
