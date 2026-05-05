@@ -1,36 +1,35 @@
 <?php namespace ProcessWire;
 
-use ProcessWire\Page;
 use ProcessWire\Wire;
 
 /**
  * PLWithdrawalService
  *
- * Implements the FAGG / EU 2023/2673 electronic withdrawal flow:
- *  - Step 1 (form):    user fills form on /withdrawal/
- *  - Step 2 (confirm): user reviews + confirms on /withdrawal/confirm/
- *  - Step 3 (submit):  if a matching user exists, an entry is appended to
- *                      the user's spl_withdrawals repeater; receipt + admin
- *                      mails are sent in either case.
+ * FAGG / EU 2023/2673 electronic withdrawal flow as Bootstrap modals:
+ *  - withdrawalFormModal       — step 1: form fields
+ *  - withdrawalConfirmModal    — step 2: review + explicit confirm checkbox
+ *  - withdrawalSuccessModal    — step 3: receipt confirmation
  *
- * Dispatched by PLApiController for the two POST ops:
- *  - withdrawal_init   (form → confirm)
- *  - withdrawal_submit (confirm → repeater entry + mails)
+ * Trigger from anywhere (e.g. footer link):
+ *   <a href="#" data-bs-toggle="modal" data-bs-target="#withdrawalFormModal">
+ *     Vertrag widerrufen
+ *   </a>
  *
- * Frontend rendering happens through StripePaymentLinks::render($page),
- * which detects withdrawal pages and routes here.
+ * Submission goes to the existing /stripepaymentlinks/api endpoint with
+ * op=withdrawal_init (form → confirm) and op=withdrawal_submit
+ * (confirm → repeater entry + mails). The AJAX response carries an
+ * `open_modal` field so the frontend transitions modals.
  */
 final class PLWithdrawalService extends Wire
 {
 	/** @var StripePaymentLinks */
 	private StripePaymentLinks $mod;
 
-	/** Session key for pending data between step 1 and step 2 */
 	private const SESS_KEY    = 'spl_withdrawal_pending';
-	private const SESS_TTL    = 1800;        // 30 minutes
-	private const RATE_LIMIT  = 3;           // max submissions per window
-	private const RATE_WINDOW = 3600;        // 1 hour
-	private const HONEYPOT    = 'website';   // hidden field name
+	private const SESS_TTL    = 1800;       // 30 minutes
+	private const RATE_LIMIT  = 3;          // max submissions per window
+	private const RATE_WINDOW = 3600;       // 1 hour
+	private const HONEYPOT    = 'website';  // hidden field name
 
 	public function __construct(StripePaymentLinks $mod)
 	{
@@ -38,54 +37,134 @@ final class PLWithdrawalService extends Wire
 	}
 
 	/* ------------------------------------------------------------------
-	 * Public entry points (called from module + PLApiController)
+	 * Modal renderers (all return HTML; called from StripePaymentLinks::render)
 	 * ----------------------------------------------------------------*/
 
-	/**
-	 * Render the appropriate withdrawal step for the current page.
-	 * Dispatched by StripePaymentLinks::render() for withdrawal pages.
-	 *
-	 * @param Page $page Current page being rendered.
-	 * @return string HTML markup.
-	 */
-	public function renderForPage(Page $page): string
+	public function modalForm(): string
 	{
-		$session = $this->mod->wire('session');
-		try {
-			// Step 3: success — set in session by handleSubmit()
-			if ($session->get('spl_withdrawal_success')) {
-				$session->remove('spl_withdrawal_success');
-				return $this->renderSuccess();
-			}
+		$mod = $this->mod;
+		$h = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
+		$action = $mod->apiUrl();
+		$csrf   = $mod->wire('session')->CSRF->renderInput();
 
-			if ($page->name === 'confirm') {
-				return $this->renderConfirm();
-			}
-			return $this->renderForm();
-		} catch (\Throwable $e) {
-			$this->mod->wire('log')->save(StripePaymentLinks::LOG_PL,
-				'[WITHDRAWAL] renderForPage error on ' . $page->path . ': ' . $e->getMessage()
-				. ' @ ' . $e->getFile() . ':' . $e->getLine()
-			);
-			$h = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
-			return '<div class="spl-withdrawal alert alert-danger">'
-				 . $h($this->mod->t('withdrawal.error.generic')) . '</div>';
-		}
+		$privacy = $this->renderPrivacyNotice();
+
+		$body  = '<p class="mb-3">' . $h($mod->t('withdrawal.form.intro')) . '</p>';
+		$body .= '<form method="post" action="' . $h($action) . '" data-ajax="pw-json"'
+			   . ' data-error-id="withdrawalFormError" data-success-id="withdrawalFormSuccess">';
+		$body .= $csrf;
+		$body .= '<input type="hidden" name="op" value="withdrawal_init">';
+		// Honeypot
+		$body .= '<div style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden;" aria-hidden="true">'
+			   . '<label>Website <input type="text" name="' . self::HONEYPOT . '" tabindex="-1" autocomplete="off"></label>'
+			   . '</div>';
+
+		$body .= $this->field('text',  'spl_withdrawal_name',  $mod->t('withdrawal.field.name'),  '', ['required' => true, 'id' => 'splWdName']);
+		$body .= $this->field('email', 'spl_withdrawal_email', $mod->t('withdrawal.field.email'), '', ['required' => true, 'help' => $mod->t('withdrawal.field.email_help'), 'id' => 'splWdEmail']);
+
+		$body .= '<div class="row g-3">'
+			   . '<div class="col-md-6">' . $this->field('text', 'spl_withdrawal_order_id',   $mod->t('withdrawal.field.order_id'),   '', ['id' => 'splWdOrderId']) . '</div>'
+			   . '<div class="col-md-6">' . $this->field('date', 'spl_withdrawal_order_date', $mod->t('withdrawal.field.order_date'), '', ['id' => 'splWdOrderDate']) . '</div>'
+			   . '</div>'
+			   . '<div class="form-text mb-3">' . $h($mod->t('withdrawal.field.either_or_help')) . '</div>';
+
+		$body .= $this->field('text',     'spl_withdrawal_product', $mod->t('withdrawal.field.product'), '', ['required' => true, 'id' => 'splWdProduct']);
+		$body .= $this->field('textarea', 'spl_withdrawal_reason',  $mod->t('withdrawal.field.reason'),  '', ['help' => $mod->t('withdrawal.field.reason_help'), 'id' => 'splWdReason']);
+
+		$body .= $privacy;
+
+		$body .= '<div class="text-danger small my-2" id="withdrawalFormError" style="display:none;"></div>';
+		$body .= '<div class="text-success small my-2" id="withdrawalFormSuccess" style="display:none;"></div>';
+
+		$body .= '<div class="d-flex justify-content-end gap-2 mt-3">';
+		$body .= '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">' . $h($mod->t('modal.notice.cancel')) . '</button>';
+		$body .= '<button type="submit" class="btn btn-primary">' . $h($mod->t('withdrawal.form.submit')) . '</button>';
+		$body .= '</div>';
+		$body .= '</form>';
+
+		return $this->modalShell('withdrawalFormModal', $h($mod->t('withdrawal.form.title')), $body);
+	}
+
+	public function modalConfirm(): string
+	{
+		$mod = $this->mod;
+		$h = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
+		$action = $mod->apiUrl();
+		$csrf   = $mod->wire('session')->CSRF->renderInput();
+
+		$body  = '<p class="mb-3">' . $h($mod->t('withdrawal.confirm.intro')) . '</p>';
+		// Will be filled by the AJAX response from withdrawal_init
+		$body .= '<dl class="row mb-3" id="withdrawalConfirmData"></dl>';
+
+		$body .= '<form method="post" action="' . $h($action) . '" data-ajax="pw-json"'
+			   . ' data-error-id="withdrawalConfirmError" data-success-id="withdrawalConfirmSuccess">';
+		$body .= $csrf;
+		$body .= '<input type="hidden" name="op" value="withdrawal_submit">';
+		$body .= '<div style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden;" aria-hidden="true">'
+			   . '<input type="text" name="' . self::HONEYPOT . '" tabindex="-1" autocomplete="off"></div>';
+
+		$body .= '<div class="form-check mb-3">'
+			   . '<input class="form-check-input" type="checkbox" name="spl_withdrawal_confirm" id="splWdConfirmCheck" value="1" required>'
+			   . '<label class="form-check-label" for="splWdConfirmCheck">' . $h($mod->t('withdrawal.confirm.checkbox')) . '</label>'
+			   . '</div>';
+
+		$body .= '<div class="text-danger small my-2" id="withdrawalConfirmError" style="display:none;"></div>';
+		$body .= '<div class="text-success small my-2" id="withdrawalConfirmSuccess" style="display:none;"></div>';
+
+		$body .= '<div class="d-flex justify-content-end gap-2 mt-3">';
+		$body .= '<button type="button" class="btn btn-secondary" data-bs-toggle="modal" data-bs-target="#withdrawalFormModal">' . $h($mod->t('withdrawal.confirm.back')) . '</button>';
+		$body .= '<button type="submit" class="btn btn-primary">' . $h($mod->t('withdrawal.confirm.submit')) . '</button>';
+		$body .= '</div>';
+		$body .= '</form>';
+
+		return $this->modalShell('withdrawalConfirmModal', $h($mod->t('withdrawal.confirm.title')), $body);
+	}
+
+	public function modalSuccess(): string
+	{
+		$mod = $this->mod;
+		$h = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
+
+		$body  = '<p class="mb-3">' . $h($mod->t('withdrawal.success.message')) . '</p>';
+		$body .= '<div class="d-flex justify-content-end mt-3">';
+		$body .= '<button type="button" class="btn btn-primary" data-bs-dismiss="modal">' . $h($mod->t('withdrawal.success.close')) . '</button>';
+		$body .= '</div>';
+
+		return $this->modalShell('withdrawalSuccessModal', $h($mod->t('withdrawal.success.title')), $body);
 	}
 
 	/**
-	 * Handle POST op=withdrawal_init.
-	 * Validates form, stores data in session, returns redirect to confirm page.
+	 * Render a Bootstrap modal shell (header + body) consistent with
+	 * the existing PLModalService output.
+	 */
+	private function modalShell(string $id, string $title, string $body): string
+	{
+		return '<div class="modal fade" id="' . $id . '" tabindex="-1" aria-hidden="true" role="dialog" aria-labelledby="' . $id . '-title">'
+			 . '<div class="modal-dialog modal-dialog-centered modal-lg">'
+			 . '<div class="modal-content">'
+			 . '<div class="modal-header bg-primary">'
+			 . '<h5 id="' . $id . '-title" class="modal-title text-white">' . $title . '</h5>'
+			 . '<button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>'
+			 . '</div>'
+			 . '<div class="modal-body p-3">' . $body . '</div>'
+			 . '</div></div></div>';
+	}
+
+	/* ------------------------------------------------------------------
+	 * API handlers (called from PLApiController dispatch)
+	 * ----------------------------------------------------------------*/
+
+	/**
+	 * op=withdrawal_init: validate form, store pending in session,
+	 * return JSON containing the rendered review HTML for the confirm modal.
 	 *
 	 * @param \ProcessWire\HookEvent $event
-	 * @return void Sets $event->return to JSON response.
 	 */
 	public function handleInit($event): void
 	{
 		$mod     = $this->mod;
 		$input   = $mod->wire('input');
 		$session = $mod->wire('session');
-		$pages   = $mod->wire('pages');
 		$san     = $mod->wire('sanitizer');
 
 		$json = function(array $arr, int $status = 200) {
@@ -97,7 +176,7 @@ final class PLWithdrawalService extends Wire
 		// Honeypot — silent reject
 		if (trim((string) $input->post(self::HONEYPOT)) !== '') {
 			$mod->wire('log')->save(StripePaymentLinks::LOG_SEC, '[WITHDRAWAL] honeypot triggered (init)');
-			$event->return = $json(['ok' => true, 'redirect' => $this->withdrawalUrl()]);
+			$event->return = $json(['ok' => true]);
 			return;
 		}
 
@@ -121,7 +200,7 @@ final class PLWithdrawalService extends Wire
 			return;
 		}
 
-		$session->set(self::SESS_KEY, [
+		$pending = [
 			'name'       => $name,
 			'email'      => $email,
 			'order_id'   => $orderId,
@@ -129,24 +208,23 @@ final class PLWithdrawalService extends Wire
 			'product'    => $product,
 			'reason'     => $reason,
 			'created_at' => time(),
-		]);
-
-		$confirm = $pages->get('/withdrawal/confirm/');
-		$redirect = ($confirm && $confirm->id) ? $confirm->httpUrl : $this->withdrawalUrl();
+		];
+		$session->set(self::SESS_KEY, $pending);
 
 		$event->return = $json([
-			'ok'       => true,
-			'msg'      => $mod->t('withdrawal.api.init.ok'),
-			'redirect' => $redirect,
+			'ok'         => true,
+			'msg'        => $mod->t('withdrawal.api.init.ok'),
+			'open_modal' => 'withdrawalConfirmModal',
+			'html_for'   => '#withdrawalConfirmData',
+			'html'       => $this->renderConfirmDataDl($pending),
 		]);
 	}
 
 	/**
-	 * Handle POST op=withdrawal_submit.
-	 * Validates confirmation, creates repeater entry (if user exists), sends mails.
+	 * op=withdrawal_submit: validate confirm checkbox, append repeater entry
+	 * (if user matches), send mails, return success.
 	 *
 	 * @param \ProcessWire\HookEvent $event
-	 * @return void
 	 */
 	public function handleSubmit($event): void
 	{
@@ -163,7 +241,7 @@ final class PLWithdrawalService extends Wire
 		// Honeypot — silent reject
 		if (trim((string) $input->post(self::HONEYPOT)) !== '') {
 			$mod->wire('log')->save(StripePaymentLinks::LOG_SEC, '[WITHDRAWAL] honeypot triggered (submit)');
-			$event->return = $json(['ok' => true, 'redirect' => $this->withdrawalUrl()]);
+			$event->return = $json(['ok' => true]);
 			return;
 		}
 
@@ -178,20 +256,17 @@ final class PLWithdrawalService extends Wire
 			return;
 		}
 
-		// Confirmation checkbox
 		if (!$input->post('spl_withdrawal_confirm')) {
 			$event->return = $json(['ok' => false, 'error' => $mod->t('withdrawal.error.confirm_required')]);
 			return;
 		}
 
-		// Rate limiting (per IP hash, last hour)
 		$ipHash = $this->hashIp($session->getIP());
 		if ($this->isRateLimited($ipHash)) {
 			$event->return = $json(['ok' => false, 'error' => $mod->t('withdrawal.error.rate_limited')], 429);
 			return;
 		}
 
-		// Try to attach to an existing user
 		$entryItem  = null;
 		$user       = $this->findUserByEmail($pending['email']);
 		$userStatus = $user ? ('linked to user #' . $user->id) : 'no matching account';
@@ -206,7 +281,6 @@ final class PLWithdrawalService extends Wire
 			}
 		}
 
-		// Mails (best-effort, never block the flow)
 		$sentReceipt = $mod->mail()->sendWithdrawalReceiptMail($mod, $pending);
 		if ($sentReceipt && $entryItem && $entryItem->id) {
 			$entryItem->of(false);
@@ -218,97 +292,29 @@ final class PLWithdrawalService extends Wire
 
 		$this->bumpRateLimit($ipHash);
 		$session->remove(self::SESS_KEY);
-		$session->set('spl_withdrawal_success', 1);
 
 		$mod->wire('log')->save(StripePaymentLinks::LOG_PL,
 			'[WITHDRAWAL] new entry email=' . $pending['email'] . ' (' . $userStatus . ')'
 		);
 
 		$event->return = $json([
-			'ok'       => true,
-			'msg'      => $mod->t('withdrawal.api.submit.ok'),
-			'redirect' => $this->withdrawalUrl(),
+			'ok'         => true,
+			'msg'        => $mod->t('withdrawal.api.submit.ok'),
+			'open_modal' => 'withdrawalSuccessModal',
 		]);
 	}
 
 	/* ------------------------------------------------------------------
-	 * Step renderers
+	 * Helpers
 	 * ----------------------------------------------------------------*/
 
 	/**
-	 * Render step 1: the withdrawal form.
+	 * Render the <dl> rows for the confirm modal data panel.
 	 */
-	private function renderForm(): string
+	private function renderConfirmDataDl(array $pending): string
 	{
 		$mod = $this->mod;
-		$h = fn($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
-
-		$action  = $mod->apiUrl();
-		$csrf    = $mod->wire('session')->CSRF->renderInput();
-		$privacy = $this->renderPrivacyNotice();
-
-		$out  = '<div class="spl-withdrawal spl-withdrawal-form">';
-		$out .= '<h1 class="mb-3">' . $h($mod->t('withdrawal.form.title')) . '</h1>';
-		$out .= '<p class="lead mb-4">' . $h($mod->t('withdrawal.form.intro')) . '</p>';
-
-		$out .= '<form method="post" action="' . $h($action) . '" data-ajax="pw-json"'
-			  . ' data-error-id="splWithdrawalError" data-success-id="splWithdrawalSuccess">';
-		$out .= $csrf;
-		$out .= '<input type="hidden" name="op" value="withdrawal_init">';
-
-		// Honeypot
-		$out .= '<div style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden;" aria-hidden="true">'
-			  . '<label>Website <input type="text" name="' . self::HONEYPOT . '" tabindex="-1" autocomplete="off"></label>'
-			  . '</div>';
-
-		$out .= $this->field('text',  'spl_withdrawal_name',     $mod->t('withdrawal.field.name'),  '', ['required' => true]);
-		$out .= $this->field('email', 'spl_withdrawal_email',    $mod->t('withdrawal.field.email'), '', ['required' => true, 'help' => $mod->t('withdrawal.field.email_help')]);
-
-		$out .= '<div class="row g-3">';
-		$out .= '<div class="col-md-6">' . $this->field('text', 'spl_withdrawal_order_id',   $mod->t('withdrawal.field.order_id'),   '', []) . '</div>';
-		$out .= '<div class="col-md-6">' . $this->field('date', 'spl_withdrawal_order_date', $mod->t('withdrawal.field.order_date'), '', []) . '</div>';
-		$out .= '</div>';
-		$out .= '<div class="form-text mb-3">' . $h($mod->t('withdrawal.field.either_or_help')) . '</div>';
-
-		$out .= $this->field('text',     'spl_withdrawal_product', $mod->t('withdrawal.field.product'), '', ['required' => true]);
-		$out .= $this->field('textarea', 'spl_withdrawal_reason',  $mod->t('withdrawal.field.reason'),  '', ['help' => $mod->t('withdrawal.field.reason_help')]);
-
-		$out .= $privacy;
-
-		$out .= '<div class="text-danger small my-2" id="splWithdrawalError" style="display:none;"></div>';
-		$out .= '<div class="text-success small my-2" id="splWithdrawalSuccess" style="display:none;"></div>';
-
-		$out .= '<button type="submit" class="btn btn-primary btn-lg">' . $h($mod->t('withdrawal.form.submit')) . '</button>';
-		$out .= '</form>';
-		$out .= '</div>';
-
-		$out .= $this->ajaxScript();
-
-		return $out;
-	}
-
-	/**
-	 * Render step 2: confirmation review.
-	 */
-	private function renderConfirm(): string
-	{
-		$mod = $this->mod;
-		$h = fn($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
-		$session = $mod->wire('session');
-		$pending = $session->get(self::SESS_KEY);
-
-		if (!is_array($pending) || empty($pending['email'])
-			|| time() - (int) ($pending['created_at'] ?? 0) > self::SESS_TTL) {
-			$session->remove(self::SESS_KEY);
-			return '<div class="spl-withdrawal alert alert-warning">'
-				 . $h($mod->t('withdrawal.error.session_expired')) . ' '
-				 . '<a href="' . $h($this->withdrawalUrl()) . '">' . $h($mod->t('withdrawal.confirm.back')) . '</a>'
-				 . '</div>';
-		}
-
-		$action = $mod->apiUrl();
-		$csrf   = $mod->wire('session')->CSRF->renderInput();
-
+		$h = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
 		$rows = [
 			'withdrawal.confirm.label_name'    => $pending['name']       ?? '',
 			'withdrawal.confirm.label_email'   => $pending['email']      ?? '',
@@ -317,69 +323,15 @@ final class PLWithdrawalService extends Wire
 			'withdrawal.confirm.label_date'    => $pending['order_date'] ?? '',
 			'withdrawal.confirm.label_reason'  => $pending['reason']     ?? '',
 		];
-
-		$out  = '<div class="spl-withdrawal spl-withdrawal-confirm">';
-		$out .= '<h1 class="mb-3">' . $h($mod->t('withdrawal.confirm.title')) . '</h1>';
-		$out .= '<p class="lead mb-4">' . $h($mod->t('withdrawal.confirm.intro')) . '</p>';
-
-		$out .= '<dl class="row mb-4">';
+		$out = '';
 		foreach ($rows as $key => $value) {
 			if (trim((string) $value) === '') continue;
-			$out .= '<dt class="col-sm-3">' . $h($mod->t($key)) . '</dt>';
-			$out .= '<dd class="col-sm-9">' . nl2br($h($value)) . '</dd>';
+			$out .= '<dt class="col-sm-4">' . $h($mod->t($key)) . '</dt>';
+			$out .= '<dd class="col-sm-8">' . nl2br($h($value)) . '</dd>';
 		}
-		$out .= '</dl>';
-
-		$out .= '<form method="post" action="' . $h($action) . '" data-ajax="pw-json"'
-			  . ' data-error-id="splWithdrawalError" data-success-id="splWithdrawalSuccess">';
-		$out .= $csrf;
-		$out .= '<input type="hidden" name="op" value="withdrawal_submit">';
-		$out .= '<div style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden;" aria-hidden="true">'
-			  . '<input type="text" name="' . self::HONEYPOT . '" tabindex="-1" autocomplete="off"></div>';
-
-		$out .= '<div class="form-check mb-3">'
-			  . '<input class="form-check-input" type="checkbox" name="spl_withdrawal_confirm" id="spl_withdrawal_confirm" value="1" required>'
-			  . '<label class="form-check-label" for="spl_withdrawal_confirm">' . $h($mod->t('withdrawal.confirm.checkbox')) . '</label>'
-			  . '</div>';
-
-		$out .= '<div class="text-danger small my-2" id="splWithdrawalError" style="display:none;"></div>';
-		$out .= '<div class="text-success small my-2" id="splWithdrawalSuccess" style="display:none;"></div>';
-
-		$out .= '<a class="btn btn-secondary me-2" href="' . $h($this->withdrawalUrl()) . '">' . $h($mod->t('withdrawal.confirm.back')) . '</a>';
-		$out .= '<button type="submit" class="btn btn-primary btn-lg">' . $h($mod->t('withdrawal.confirm.submit')) . '</button>';
-		$out .= '</form>';
-		$out .= '</div>';
-
-		$out .= $this->ajaxScript();
-
 		return $out;
 	}
 
-	/**
-	 * Render step 3: success page.
-	 */
-	private function renderSuccess(): string
-	{
-		$mod = $this->mod;
-		$h = fn($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
-		return '<div class="spl-withdrawal spl-withdrawal-success">'
-			 . '<h1 class="mb-3">' . $h($mod->t('withdrawal.success.title')) . '</h1>'
-			 . '<p class="lead">' . $h($mod->t('withdrawal.success.message')) . '</p>'
-			 . '</div>';
-	}
-
-	/* ------------------------------------------------------------------
-	 * Repeater entry creation
-	 * ----------------------------------------------------------------*/
-
-	/**
-	 * Append a new entry to the user's spl_withdrawals repeater.
-	 *
-	 * @param \ProcessWire\User $user
-	 * @param array $pending
-	 * @param string $ipHash
-	 * @return \ProcessWire\Page The new repeater item.
-	 */
 	private function appendRepeaterEntry(\ProcessWire\User $user, array $pending, string $ipHash): \ProcessWire\Page
 	{
 		$user->of(false);
@@ -406,14 +358,9 @@ final class PLWithdrawalService extends Wire
 			$item->spl_withdrawal_linked_purchase_id = $linkedId;
 		}
 		$item->save();
-
 		return $item;
 	}
 
-	/**
-	 * Try to match the withdrawal against an existing spl_purchases entry
-	 * by order_id (Stripe Session ID) or order_date.
-	 */
 	private function matchPurchase(\ProcessWire\User $user, array $pending): int
 	{
 		if (!$user->hasField('spl_purchases')) return 0;
@@ -442,10 +389,6 @@ final class PLWithdrawalService extends Wire
 		return 0;
 	}
 
-	/* ------------------------------------------------------------------
-	 * Helpers
-	 * ----------------------------------------------------------------*/
-
 	private function findUserByEmail(string $email): ?\ProcessWire\User
 	{
 		$email = trim($email);
@@ -453,14 +396,6 @@ final class PLWithdrawalService extends Wire
 		$san = $this->mod->wire('sanitizer');
 		$u = $this->mod->wire('users')->get('email=' . $san->email($email));
 		return ($u && $u->id) ? $u : null;
-	}
-
-	private function withdrawalUrl(): string
-	{
-		$pages = $this->mod->wire('pages');
-		$p = $pages->get('/withdrawal/');
-		if ($p && $p->id) return $p->httpUrl;
-		return $pages->get('/')->httpUrl;
 	}
 
 	/**
@@ -501,7 +436,7 @@ final class PLWithdrawalService extends Wire
 	private function field(string $type, string $name, string $label, string $value = '', array $opts = []): string
 	{
 		$h = fn($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
-		$id = $h($name);
+		$id = isset($opts['id']) ? $opts['id'] : $name;
 		$req = !empty($opts['required']) ? ' required' : '';
 		$reqMark = $req ? ' <span class="text-danger" aria-hidden="true">*</span>' : '';
 		$help = isset($opts['help']) && $opts['help'] !== ''
@@ -509,48 +444,14 @@ final class PLWithdrawalService extends Wire
 
 		if ($type === 'textarea') {
 			return '<div class="mb-3">'
-				 . '<label class="form-label" for="' . $id . '">' . $h($label) . $reqMark . '</label>'
-				 . '<textarea class="form-control" id="' . $id . '" name="' . $h($name) . '" rows="4"' . $req . '>' . $h($value) . '</textarea>'
+				 . '<label class="form-label" for="' . $h($id) . '">' . $h($label) . $reqMark . '</label>'
+				 . '<textarea class="form-control" id="' . $h($id) . '" name="' . $h($name) . '" rows="4"' . $req . '>' . $h($value) . '</textarea>'
 				 . $help . '</div>';
 		}
 		$inputType = $type === 'date' ? 'date' : ($type === 'email' ? 'email' : 'text');
 		return '<div class="mb-3">'
-			 . '<label class="form-label" for="' . $id . '">' . $h($label) . $reqMark . '</label>'
-			 . '<input type="' . $inputType . '" class="form-control" id="' . $id . '" name="' . $h($name) . '" value="' . $h($value) . '"' . $req . '>'
+			 . '<label class="form-label" for="' . $h($id) . '">' . $h($label) . $reqMark . '</label>'
+			 . '<input type="' . $inputType . '" class="form-control" id="' . $h($id) . '" name="' . $h($name) . '" value="' . $h($value) . '"' . $req . '>'
 			 . $help . '</div>';
-	}
-
-	/**
-	 * Inline AJAX submit handler for forms inside .spl-withdrawal.
-	 */
-	private function ajaxScript(): string
-	{
-		$errGeneric = json_encode($this->mod->t('withdrawal.error.generic'), JSON_UNESCAPED_UNICODE);
-		$errServer  = json_encode($this->mod->t('ui.ajax.error_server'),     JSON_UNESCAPED_UNICODE);
-		return <<<HTML
-<script>
-(function(){
-  document.addEventListener('submit', async function(ev){
-	var form = ev.target.closest('.spl-withdrawal form[data-ajax="pw-json"]');
-	if (!form) return;
-	ev.preventDefault();
-	var errorBox   = document.getElementById(form.getAttribute('data-error-id'));
-	var successBox = document.getElementById(form.getAttribute('data-success-id'));
-	var show = function(el, msg){ if(el){ el.textContent = msg||''; el.style.display = msg ? 'block':'none'; } };
-	show(errorBox,''); show(successBox,'');
-	var fd = new FormData(form);
-	try {
-	  var res  = await fetch(form.action, { method:'POST', body:fd, credentials:'same-origin' });
-	  var json = await res.json();
-	  if (!json.ok) { show(errorBox, json.error || {$errGeneric}); return; }
-	  if (json.msg) show(successBox, json.msg);
-	  if (json.redirect) { window.location.href = json.redirect; return; }
-	} catch(e) {
-	  show(errorBox, {$errServer});
-	}
-  });
-})();
-</script>
-HTML;
 	}
 }

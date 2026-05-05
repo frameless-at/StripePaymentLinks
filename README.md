@@ -224,15 +224,18 @@ This makes it easy to audit or re-import purchases safely.
 
 The module ships an electronic withdrawal function ("Vertrag widerrufen")
 required for B2C distance contracts in Austria/EU effective June 19, 2026.
+Delivered as a three-step **Bootstrap modal flow** rendered on every
+frontend page — no dedicated pages, no template choice, no theme rewrite.
 
 ### What the module does
 
-- Adds a repeater `spl_withdrawals` to the user template (with 13
+- Adds a repeater `spl_withdrawals` to the user template (13
   `spl_withdrawal_*` sub-fields). The companion module **StripePlAdmin**
   reads/manages these entries.
-- Auto-creates `/withdrawal/` and `/withdrawal/confirm/` pages with the
-  template selected in module config (`withdrawalPageTemplate`).
-- Renders a two-step form (form → explicit confirmation step → submit).
+- Renders three modals on every frontend page:
+  - `#withdrawalFormModal` — step 1: contract identification + reason
+  - `#withdrawalConfirmModal` — step 2: review + explicit confirmation
+  - `#withdrawalSuccessModal` — step 3: receipt confirmation
 - On submit:
   - if the entered email matches an existing user → appends a new
     `spl_withdrawals` repeater item;
@@ -250,21 +253,19 @@ admin in the Stripe dashboard.
 
 ### Setup
 
-1. In module config: select the **Page template** for the withdrawal
-   pages (typically the same wrapper template you use for other
-   content pages). Until set, no pages are created.
-2. Optionally set an **Internal notification email** (defaults to
-   `$config->adminEmail`).
-3. In your theme footer, add the legally required link:
+1. Optionally set **Internal notification email** in the module config
+   (defaults to `$config->adminEmail`).
+2. In your theme footer, add the legally required trigger link:
 
    ```html
-   <a href="/withdrawal/">Vertrag widerrufen</a>
+   <a href="#" data-bs-toggle="modal" data-bs-target="#withdrawalFormModal">
+     Vertrag widerrufen
+   </a>
    ```
 
-The existing `$modules->get('StripePaymentLinks')->render($page);` call
-in your theme automatically renders the withdrawal flow on the
-`/withdrawal/` and `/withdrawal/confirm/` pages — no extra integration
-needed.
+That's it. The existing `$modules->get('StripePaymentLinks')->render($page);`
+call in your theme already injects all three modals on every frontend
+page; the link above triggers the flow.
 
 ---
 

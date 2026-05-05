@@ -175,12 +175,13 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		'ui.ajax.error_generic'     => $this->_('Error'),
 		'ui.ajax.error_server'      => $this->_('Server error.'),
 
-		// ===== WITHDRAWAL: form (step 1) =====
+		// ===== WITHDRAWAL: form modal (step 1) =====
 		'withdrawal.form.title'           => $this->_('Withdraw contract'),
 		'withdrawal.form.intro'           => $this->_('You can declare your withdrawal of a distance contract here. Please identify the contract you want to withdraw from.'),
 		'withdrawal.form.submit'          => $this->_('Continue'),
+		'withdrawal.form.open'            => $this->_('Withdraw contract'),
 
-		// ===== WITHDRAWAL: confirm (step 2) =====
+		// ===== WITHDRAWAL: confirm modal (step 2) =====
 		'withdrawal.confirm.title'        => $this->_('Confirm withdrawal'),
 		'withdrawal.confirm.intro'        => $this->_('Please review your data and confirm your withdrawal.'),
 		'withdrawal.confirm.checkbox'     => $this->_('I hereby confirm my withdrawal.'),
@@ -193,9 +194,10 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		'withdrawal.confirm.label_product'=> $this->_('Product'),
 		'withdrawal.confirm.label_reason' => $this->_('Reason'),
 
-		// ===== WITHDRAWAL: success (step 3) =====
+		// ===== WITHDRAWAL: success modal (step 3) =====
 		'withdrawal.success.title'        => $this->_('Withdrawal received'),
 		'withdrawal.success.message'      => $this->_('Thank you. We have received your withdrawal and sent you a confirmation by email. We will reply within 5 business days.'),
+		'withdrawal.success.close'        => $this->_('Close'),
 
 		// ===== WITHDRAWAL: form fields =====
 		'withdrawal.field.name'           => $this->_('Your name'),
@@ -324,7 +326,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		$this->ensureProductFields();
 		$this->ensureCustomerRoleExists();
 		$this->ensureWithdrawalFields();
-		$this->ensureWithdrawalPages();
+		$this->cleanupLegacyWithdrawalPages();
 	}
 
 
@@ -340,7 +342,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		$this->ensureProductFields();
 		$this->ensureCustomerRoleExists();
 		$this->ensureWithdrawalFields();
-		$this->ensureWithdrawalPages();
+		$this->cleanupLegacyWithdrawalPages();
 	}
 	
 	/**
@@ -592,11 +594,6 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	 * @return string Rendered HTML for modals, access blocks, and scripts.
 	 */
 	public function render(Page $currentPage): string{
-		// Withdrawal flow takes precedence — no checkout/access logic on these pages
-		if ($this->isWithdrawalPage($currentPage)) {
-			return $this->withdrawal()->renderForPage($currentPage);
-		}
-
 		$this->processCheckout($currentPage);
 		$this->handleAccessParam();
 
@@ -723,10 +720,16 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			</script>';
 		}
 	
-		// 7) One-off notices + global AJAX handler
+		// 7) Withdrawal modals (Form / Confirm / Success) — always rendered on
+		// frontend so any page can trigger them via a Bootstrap data-bs-target.
+		$out .= $this->withdrawal()->modalForm();
+		$out .= $this->withdrawal()->modalConfirm();
+		$out .= $this->withdrawal()->modalSuccess();
+
+		// 8) One-off notices + global AJAX handler
 		$out .= $this->modal()->renderModalNotice();
 		$out .= $this->modal()->globalAjaxHandlerJs();
-		
+
 		return $out;
 	}
 						
@@ -1150,20 +1153,6 @@ public function processCheckout(Page $currentPage): void {
 	public function withdrawal(): PLWithdrawalService {
 		if (!$this->withdrawalService) { require_once __DIR__ . '/includes/PLWithdrawalService.php'; $this->withdrawalService = new PLWithdrawalService($this); }
 		return $this->withdrawalService;
-	}
-
-	/**
-	 * Returns true if the given page is part of the withdrawal flow.
-	 *
-	 * @param Page $page
-	 * @return bool
-	 */
-	public function isWithdrawalPage(Page $page): bool {
-		if (!$page || !$page->id) return false;
-		if ($page->name === 'withdrawal' && $page->parent && $page->parent->id === 1) return true;
-		if ($page->name === 'confirm' && $page->parent && $page->parent->name === 'withdrawal'
-		    && $page->parent->parent && $page->parent->parent->id === 1) return true;
-		return false;
 	}
 
 
@@ -1708,56 +1697,24 @@ public function processCheckout(Page $currentPage): void {
 	}
 
 	/**
-	 * Ensures /withdrawal/ and /withdrawal/confirm/ pages exist with the configured template.
-	 * If withdrawalPageTemplate is empty, no pages are created.
+	 * Removes /withdrawal/ and /withdrawal/confirm/ pages that earlier
+	 * versions of this module auto-created. The withdrawal flow is now
+	 * delivered as Bootstrap modals — no dedicated pages needed.
 	 *
 	 * @return void
 	 */
-	protected function ensureWithdrawalPages(): void {
-		$pages     = $this->wire('pages');
-		$templates = $this->wire('templates');
-
-		$tplName = trim((string) ($this->withdrawalPageTemplate ?? ''));
-		if ($tplName === '') return;
-
-		$tpl = $templates->get($tplName);
-		if (!$tpl || !$tpl->id) {
-			$this->wire('log')->save(self::LOG_PL, '[WITHDRAWAL] Configured page template not found: ' . $tplName);
-			return;
-		}
-
-		$root = $pages->get('/');
-
-		// /withdrawal/
-		$withdrawal = $pages->get("name=withdrawal, parent={$root->id}, include=all");
-		if (!$withdrawal || !$withdrawal->id) {
-			$withdrawal = new \ProcessWire\Page();
-			$withdrawal->template = $tpl;
-			$withdrawal->parent   = $root;
-			$withdrawal->name     = 'withdrawal';
-			$withdrawal->title    = $this->_('Withdraw contract');
-			$pages->save($withdrawal);
-			$this->wire('log')->save(self::LOG_PL, '[WITHDRAWAL] Created /withdrawal/');
-		} elseif ($withdrawal->template && $withdrawal->template->id !== $tpl->id) {
-			$withdrawal->of(false);
-			$withdrawal->template = $tpl;
-			$pages->save($withdrawal);
-		}
-
-		// /withdrawal/confirm/
-		$confirm = $pages->get("name=confirm, parent={$withdrawal->id}, include=all");
-		if (!$confirm || !$confirm->id) {
-			$confirm = new \ProcessWire\Page();
-			$confirm->template = $tpl;
-			$confirm->parent   = $withdrawal;
-			$confirm->name     = 'confirm';
-			$confirm->title    = $this->_('Confirm withdrawal');
-			$pages->save($confirm);
-			$this->wire('log')->save(self::LOG_PL, '[WITHDRAWAL] Created /withdrawal/confirm/');
-		} elseif ($confirm->template && $confirm->template->id !== $tpl->id) {
-			$confirm->of(false);
-			$confirm->template = $tpl;
-			$pages->save($confirm);
+	protected function cleanupLegacyWithdrawalPages(): void {
+		$pages = $this->wire('pages');
+		foreach (['/withdrawal/confirm/', '/withdrawal/'] as $path) {
+			$p = $pages->get($path);
+			if ($p && $p->id) {
+				try {
+					$pages->delete($p, true);
+					$this->wire('log')->save(self::LOG_PL, '[WITHDRAWAL] Removed legacy page: ' . $path);
+				} catch (\Throwable $e) {
+					$this->wire('log')->save(self::LOG_PL, '[WITHDRAWAL] Failed to remove legacy page ' . $path . ': ' . $e->getMessage());
+				}
+			}
 		}
 	}
 

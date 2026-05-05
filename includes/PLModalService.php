@@ -438,9 +438,36 @@ document.addEventListener('submit', async (ev) => {
 	if (json.msg || json.message) show(successBox, json.msg || json.message);
 	if (json.redirect) { window.location.href = json.redirect; return; }
 
+	// Optional payload: inject HTML into a target element before opening next modal
+	if (json.html_for && typeof json.html === 'string') {
+	  const target = document.querySelector(json.html_for);
+	  if (target) target.innerHTML = json.html;
+	}
+
 	const op = fd.get('op') || fd.get('action') || '';
 	const modalEl = form.closest('.modal');
 	const modal   = modalEl ? bootstrap.Modal.getOrCreateInstance(modalEl) : null;
+
+	// Optional payload: close current modal and open the next one
+	if (json.open_modal) {
+	  const nextEl = document.getElementById(json.open_modal);
+	  if (nextEl) {
+		const nextModal = bootstrap.Modal.getOrCreateInstance(nextEl);
+		if (modalEl && modal) {
+		  modalEl.addEventListener('hidden.bs.modal', () => nextModal.show(), { once: true });
+		  modal.hide();
+		} else {
+		  nextModal.show();
+		}
+		// Reset confirmation forms when leaving
+		if (modalEl) {
+		  const f = modalEl.querySelector('form');
+		  if (f && (op === 'withdrawal_submit' || op === 'withdrawal_init')) f.reset();
+		}
+		return;
+	  }
+	}
+
 	if (op === 'reset_request') {
 	  setTimeout(()=> modal?.hide(), 800);
 	} else if (op === 'reset_password' || op === 'set_password') {
