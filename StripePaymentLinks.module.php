@@ -1668,7 +1668,10 @@ public function processCheckout(Page $currentPage): void {
 		};
 
 		// Repeater on user template
-		$withdrawals = $ensure('spl_withdrawals', 'FieldtypeRepeater', ['label' => 'Withdrawals']);
+		$withdrawals = $ensure('spl_withdrawals', 'FieldtypeRepeater', [
+			'label'         => 'Withdrawals',
+			'repeaterTitle' => '#n: {spl_withdrawal_product} – {spl_withdrawal_status}',
+		]);
 		/** @var \ProcessWire\Template $repTpl */
 		$repTpl = $withdrawals->type->getRepeaterTemplate($withdrawals);
 		$repFg  = $repTpl->fieldgroup;
