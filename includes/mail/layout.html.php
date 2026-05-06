@@ -145,7 +145,7 @@ $showInfo = $has('productUrl') || $has('infoLabel') || $has('closingText') || $h
 				</p>
 			  <?php endif; ?>
 
-			  <?php if ($has('productUrl')): ?>
+			  <?php if ($has('productUrl') && !$val('hideDirectLink')): ?>
 			  <p style="margin:0 0 0 0;word-break:break-all;">
 				<?= $esc($directLabel) ?>:
 				<a href="<?= $esc($val('productUrl')) ?>"
