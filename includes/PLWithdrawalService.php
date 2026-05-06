@@ -429,12 +429,15 @@ final class PLWithdrawalService extends Wire
 	{
 		$mod = $this->mod;
 		$h = fn($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
-		$pageId = (int) ($mod->privacyPage ?? 0);
+		$pageId  = (int) ($mod->privacyPage ?? 0);
 		$privacy = $pageId > 0 ? $mod->wire('pages')->get($pageId) : null;
-		$link = ($privacy && $privacy->id)
-			? '<a href="' . $h($privacy->url) . '">' . $h($mod->t('withdrawal.privacy.link_label')) . '</a>'
-			: $h($mod->t('withdrawal.privacy.link_label'));
-		return '<p class="form-text my-3"><small>' . $h($mod->t('withdrawal.privacy.notice')) . ' ' . $link . '</small></p>';
+
+		$notice = $h($mod->t('withdrawal.privacy.notice'));
+		$repl   = ($privacy && $privacy->id)
+			? ['{link_start}' => '<a href="' . $h($privacy->url) . '">', '{link_end}' => '</a>']
+			: ['{link_start}' => '', '{link_end}' => ''];
+
+		return '<p class="form-text my-3"><small>' . strtr($notice, $repl) . '</small></p>';
 	}
 
 	private function field(string $type, string $name, string $label, string $value = '', array $opts = []): string

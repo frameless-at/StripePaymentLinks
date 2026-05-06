@@ -538,7 +538,6 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			$priv->name  = 'privacyPage';
 			$priv->label = 'Privacy policy page';
 			$priv->description = 'Page used as the GDPR link in the withdrawal form.';
-			$priv->notes = 'Empty = the GDPR notice label is shown without a link.';
 			$priv->columnWidth = 50;
 			$priv->parent_id = 1;
 			$priv->attr('value', (int) $this->get('privacyPage'));
