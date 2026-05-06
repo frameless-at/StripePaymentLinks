@@ -32,10 +32,12 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			'logoUrl'                => '',
 			'mailFromEmail'          => (string)($cfg->adminEmail ?? ('no-reply@' . ($cfg->httpHost ?? 'localhost'))),
 			'mailFromName'           => (string)($cfg->siteName ?? 'Website'),
+			'mailReplyTo'            => (string)($cfg->adminEmail ?? ''),
 			'subjectPrefix'          => '',
 			'brandColor'             => '#0d6efd',
 			'mailHeaderName'         => (string)($cfg->siteName ?? ''),
 			'mailSignatureName'      => (string)($cfg->siteName ?? ''),
+			'mailExtraNote'          => '',
 			
 			// Sync Helper
 			'pl_sync_dry_run' => true,
@@ -179,6 +181,15 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		$fromName->attr('value', (string)$this->get('mailFromName'));
 		$fsMail->add($fromName);
 
+		// Reply-To
+		$replyTo = $this->modules->get('InputfieldEmail');
+		$replyTo->name  = 'mailReplyTo';
+		$replyTo->label = 'Reply-To address';
+		$replyTo->columnWidth = 33;
+		$replyTo->notes = 'Recommended when sender uses no-reply@. Improves deliverability.';
+		$replyTo->attr('value', (string)$this->get('mailReplyTo'));
+		$fsMail->add($replyTo);
+
 		// Subject prefix
 		$subj = $this->modules->get('InputfieldText');
 		$subj->name  = 'subjectPrefix';
@@ -210,6 +221,21 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		$sig->columnWidth = 33;
 		$sig->attr('value', (string)$this->get('mailSignatureName'));
 		$fsMail->add($sig);
+
+		// Extra note (e.g. legal disclaimer like waiver of right of withdrawal)
+		$extra = null;
+		if ($this->modules->isInstalled('InputfieldTinyMCE')) {
+			$extra = $this->modules->get('InputfieldTinyMCE');
+		}
+		if (!$extra) {
+			$extra = $this->modules->get('InputfieldTextarea');
+		}
+		$extra->name  = 'mailExtraNote';
+		$extra->label = 'Additional mail note (optional)';
+		$extra->notes = 'Shown in the access mail above the footer. Basic formatting (bold, lists, links) is allowed and rendered in the HTML mail; for the plain-text part it is auto-stripped. Useful for legal notices like "Verzicht auf das Rücktrittsrecht".';
+		$extra->attr('rows', 6);
+		$extra->attr('value', (string)$this->get('mailExtraNote'));
+		$fsMail->add($extra);
 
 		$inputfields->add($fsMail);
 		

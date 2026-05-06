@@ -146,11 +146,11 @@ $showInfo = $has('productUrl') || $has('infoLabel') || $has('closingText') || $h
 			  <?php endif; ?>
 
 			  <?php if ($has('productUrl')): ?>
-			  <p style="margin:0 0 0 0;word-break:break-all;">
+			  <div style="margin:0;">
 				<?= $esc($directLabel) ?>:
 				<a href="<?= $esc($val('productUrl')) ?>"
-				   style="color:<?= $esc($brandColor) ?>;text-decoration:underline;"><?= $esc($val('productUrl')) ?></a>
-			  </p>
+				   style="color:<?= $esc($brandColor) ?>;text-decoration:underline;"><?= $esc($has('ctaText') ? $val('ctaText') : $val('productTitle')) ?></a>
+			  </div>
 			  <?php endif; ?>
 
 			  <?php if ($has('closingText') || $has('signatureName')): ?>
@@ -187,6 +187,23 @@ $showInfo = $has('productUrl') || $has('infoLabel') || $has('closingText') || $h
 				  </a>
 				</div>
 			  <?php endforeach; ?>
+			</td>
+		  </tr>
+		  <?php endif; ?>
+
+		  <!-- Extra note (e.g. legal disclaimer / waiver of right of withdrawal) -->
+		  <?php if ($has('extraNote')): ?>
+		  <tr>
+			<td class="px" style="padding:0 22px 18px 22px;font-size:13px;color:#6b7280;line-height:1.5;">
+			  <?php
+				$__note = (string)$val('extraNote');
+				// If TinyMCE/HTML content, render raw; if plain text, escape and preserve line breaks.
+				if (strpos($__note, '<') !== false) {
+				  echo $__note;
+				} else {
+				  echo nl2br($esc($__note));
+				}
+			  ?>
 			</td>
 		  </tr>
 		  <?php endif; ?>

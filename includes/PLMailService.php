@@ -24,7 +24,7 @@ class PLMailService extends Wire {
 			'firstname'     => $this->displayName($user),
 			'productTitle'  => $repl['{title}'],
 			'productUrl'    => (string)($links[0]['url'] ?? '#'),
-			'ctaText'       => $mod->t($isMulti ? 'mail.multi.cta' : 'mail.single.cta'),
+			'ctaText'       => strtr($mod->t($isMulti ? 'mail.multi.cta' : 'mail.single.cta'), $repl),
 			'leadText'      => strtr($mod->t($isMulti ? 'mail.multi.body' : 'mail.single.body'), $repl),
 			'logoUrl'       => (string)($mod->logoUrl ?? ''),
 			'brandColor'    => (string)($mod->brandColor ?? '#7d0a3d'),
@@ -42,6 +42,7 @@ class PLMailService extends Wire {
 				fn($l) => ['title' => (string)($l['title'] ?? ''), 'url' => (string)($l['url'] ?? '#')],
 				array_slice($links, 1)
 			) : [],
+			'extraNote'     => trim((string)($mod->mailExtraNote ?? '')),
 		];
 		$p = $mod->wire('pages')->get((int)$links[0]['id']);
 		if ($p && $p->hasField('access_mail_addon_txt')) {
@@ -60,8 +61,13 @@ class PLMailService extends Wire {
 		);
 		$m->subject(($mod->subjectPrefix ?? '') . strtr($mod->t($isMulti ? 'mail.multi.subject' : 'mail.single.subject'), $repl));
 		$m->bodyHTML($html);
-		$m->body(strtr("{$vars['leadText']}\n\n{$vars['productUrl']}\n\n{$vars['closingText']}\n{$vars['signatureName']}\n", $repl));
-	
+		$plain = "{$vars['leadText']}\n\n{$vars['productUrl']}\n\n{$vars['closingText']}\n{$vars['signatureName']}\n";
+		if ($vars['extraNote'] !== '') {
+			$plain .= "\n" . $this->plainTextFromMaybeHtml($vars['extraNote']) . "\n";
+		}
+		$m->body(strtr($plain, $repl));
+		$this->applyDeliverabilityHeaders($m, $mod);
+
 		try {
 			$sent = (bool)$m->send();
 			if ($sent) {
@@ -114,7 +120,8 @@ class PLMailService extends Wire {
 	
 		$m->bodyHTML($html);
 		$m->body($vars['leadText'] . "\n\n" . $resetUrl);
-	
+		$this->applyDeliverabilityHeaders($m, $mod);
+
 		try {
 			$sent = (bool)$m->send();
 			if ($sent) {
@@ -257,6 +264,7 @@ class PLMailService extends Wire {
 		$m->subject(((string) ($mod->subjectPrefix ?? '')) . $subject);
 		$m->bodyHTML($html);
 		$m->body($plainBody);
+		$this->applyDeliverabilityHeaders($m, $mod);
 
 		try {
 			$sent = (bool) $m->send();
@@ -267,7 +275,48 @@ class PLMailService extends Wire {
 			return false;
 		}
 	}
-	
+
+	/**
+	 * Convert a possibly-HTML string (TinyMCE input) to readable plain text
+	 * for the text/plain part of the mail. Plain input is returned unchanged.
+	 */
+	private function plainTextFromMaybeHtml(string $s): string {
+		if (strpos($s, '<') === false) return $s;
+		$s = preg_replace('/<\s*br\s*\/?>/i', "\n", $s);
+		$s = preg_replace('/<\/(p|div|li|tr|h[1-6])\s*>/i', "\n\n", $s);
+		$s = strip_tags($s);
+		$s = html_entity_decode($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+		$s = preg_replace("/[ \t]+/", ' ', $s);
+		$s = preg_replace("/\n{3,}/", "\n\n", $s);
+		return trim($s);
+	}
+
+	/**
+	 * Apply transactional/deliverability headers shared by all module mails.
+	 * - Reply-To: avoids the "noreply@ without Reply-To" red flag for filters
+	 * - Auto-Submitted (RFC 3834): correctly identifies automated mail
+	 * - X-Auto-Response-Suppress: prevents OOO loops
+	 * - X-Priority: explicitly Normal (some PHPMailer setups emit "null")
+	 */
+	private function applyDeliverabilityHeaders($m, StripePaymentLinks $mod): void {
+		if (!method_exists($m, 'header')) return;
+
+		$replyTo = trim((string)($mod->mailReplyTo ?? ''));
+		if ($replyTo === '') {
+			$replyTo = trim((string)($mod->wire('config')->adminEmail ?? ''));
+		}
+		try {
+			if ($replyTo !== '') {
+				// Set via header() rather than replyTo() — survives all WireMail
+				// backends; replyTo() is silently dropped by some implementations.
+				$m->header('Reply-To', $replyTo);
+			}
+			$m->header('Auto-Submitted', 'auto-generated');
+			$m->header('X-Auto-Response-Suppress', 'All');
+			$m->header('X-Priority', '3');
+		} catch (\Throwable $e) { /* ignore */ }
+	}
+
 	/* =====================================================================
 	 * Helpers
 	 * ===================================================================*/
@@ -292,11 +341,41 @@ class PLMailService extends Wire {
 			$u = htmlspecialchars((string)($vars['productUrl'] ?? '#'),   ENT_QUOTES, 'UTF-8');
 			$c = htmlspecialchars((string)($vars['ctaText'] ?? 'Open'),   ENT_QUOTES, 'UTF-8');
 			$lead = htmlspecialchars((string)($vars['leadText'] ?? ''),   ENT_QUOTES, 'UTF-8');
-			return "<p>{$lead}</p><p><a href=\"{$u}\">{$c}</a></p>";
+			return $this->absolutizeUrls("<p>{$lead}</p><p><a href=\"{$u}\">{$c}</a></p>");
 		}
 		extract($vars, EXTR_SKIP);
 		ob_start();
 		include $file;
-		return (string) ob_get_clean();
+		return $this->absolutizeUrls((string) ob_get_clean());
+	}
+
+	/**
+	 * Rewrite root-relative href URLs (e.g. "/agb/") to absolute URLs based on
+	 * $config->urls->httpRoot. Leaves http(s)://, //, mailto:, tel:, # and
+	 * non-root-relative paths untouched. Only acts on href attributes.
+	 *
+	 * Public for unit-testability in isolation.
+	 */
+	public function absolutizeUrls(string $html): string
+	{
+		$config = wire('config');
+		$base = '';
+		if ($config) {
+			if (isset($config->urls) && (string)($config->urls->httpRoot ?? '') !== '') {
+				$base = (string)$config->urls->httpRoot;
+			} else {
+				$scheme = !empty($config->https) ? 'https' : 'http';
+				$host   = (string)($config->httpHost ?? '');
+				if ($host !== '') $base = $scheme . '://' . $host . '/';
+			}
+		}
+		if ($base === '') return $html;
+		$base = rtrim($base, '/');
+
+		return preg_replace_callback(
+			'/\bhref=(["\'])(\/[^\/"\'][^"\']*)\1/i',
+			fn($m) => 'href=' . $m[1] . $base . $m[2] . $m[1],
+			$html
+		);
 	}
 }
