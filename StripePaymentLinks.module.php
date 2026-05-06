@@ -235,6 +235,8 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		'withdrawal.mail.admin.subject'      => $this->_('New withdrawal received: {product}'),
 		'withdrawal.mail.admin.headline'     => $this->_('New withdrawal'),
 		'withdrawal.mail.admin.body'         => $this->_("A new withdrawal declaration has arrived.\n\n  Name:        {name}\n  Email:       {email}\n  Product:     {product}\n  Order no.:   {order_id}\n  Order date:  {order_date}\n  Reason:      {reason}\n  User:        {user_status}"),
+		'withdrawal.mail.admin.cta_user'     => $this->_('Open user profile'),
+		'withdrawal.mail.admin.user_unknown' => $this->_('no matching account'),
 
 		// ===== WITHDRAWAL: API responses =====
 		'withdrawal.api.init.ok'             => $this->_('Please confirm your withdrawal on the next page.'),

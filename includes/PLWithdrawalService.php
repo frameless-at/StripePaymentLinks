@@ -269,7 +269,6 @@ final class PLWithdrawalService extends Wire
 
 		$entryItem  = null;
 		$user       = $this->findUserByEmail($pending['email']);
-		$userStatus = $user ? ('linked to user #' . $user->id) : 'no matching account';
 
 		if ($user && $user->id && $user->hasField('spl_withdrawals')) {
 			try {
@@ -290,13 +289,14 @@ final class PLWithdrawalService extends Wire
 			$entryItem->spl_withdrawal_confirmation_sent_at = time();
 			try { $entryItem->save(); } catch (\Throwable $e) {}
 		}
-		$mod->mail()->sendWithdrawalAdminMail($mod, $pending, $userStatus);
+		$mod->mail()->sendWithdrawalAdminMail($mod, $pending, $user);
 
 		$this->bumpRateLimit($ipHash);
 		$session->remove(self::SESS_KEY);
 
 		$mod->wire('log')->save(StripePaymentLinks::LOG_PL,
-			'[WITHDRAWAL] new entry email=' . $pending['email'] . ' (' . $userStatus . ')'
+			'[WITHDRAWAL] new entry email=' . $pending['email']
+			. ($user && $user->id ? ' user=#' . $user->id : ' no-user')
 		);
 
 		$event->return = $json([

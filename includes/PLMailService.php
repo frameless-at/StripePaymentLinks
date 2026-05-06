@@ -197,7 +197,7 @@ class PLMailService extends Wire {
 	/* =====================================================================
 	 * WITHDRAWAL: internal admin notification mail
 	 * ===================================================================*/
-	public function sendWithdrawalAdminMail(StripePaymentLinks $mod, array $data, string $userStatus = ''): bool
+	public function sendWithdrawalAdminMail(StripePaymentLinks $mod, array $data, ?\ProcessWire\User $user = null): bool
 	{
 		$mail   = wire('mail');
 		$config = wire('config');
@@ -206,6 +206,14 @@ class PLMailService extends Wire {
 		if ($to === '') $to = (string) ($config->adminEmail ?? '');
 		if ($to === '') return false;
 
+		$userEditUrl = '';
+		if ($user && $user->id) {
+			$userEditUrl = rtrim((string) $config->urls->httpAdmin, '/') . '/page/edit/?id=' . (int) $user->id;
+			$userStatus  = '#' . (int) $user->id . ' (' . (string) $user->email . ')';
+		} else {
+			$userStatus = (string) $mod->t('withdrawal.mail.admin.user_unknown');
+		}
+
 		$repl = [
 			'{name}'        => (string) ($data['name']     ?? ''),
 			'{email}'       => (string) ($data['email']    ?? ''),
@@ -213,7 +221,7 @@ class PLMailService extends Wire {
 			'{order_id}'    => trim((string) ($data['order_id']   ?? '')) !== '' ? (string) $data['order_id']   : '—',
 			'{order_date}'  => trim((string) ($data['order_date'] ?? '')) !== '' ? (string) $data['order_date'] : '—',
 			'{reason}'      => trim((string) ($data['reason'] ?? '')) !== '' ? (string) $data['reason'] : '—',
-			'{user_status}' => $userStatus !== '' ? $userStatus : 'unknown',
+			'{user_status}' => $userStatus,
 		];
 
 		$subject = strtr((string) $mod->t('withdrawal.mail.admin.subject'), $repl);
@@ -222,8 +230,8 @@ class PLMailService extends Wire {
 		$vars = [
 			'preheader'     => $subject,
 			'productTitle'  => (string) ($data['product'] ?? ''),
-			'productUrl'    => '',
-			'ctaText'       => '',
+			'productUrl'    => $userEditUrl,
+			'ctaText'       => $userEditUrl !== '' ? (string) $mod->t('withdrawal.mail.admin.cta_user') : '',
 			'leadText'      => $lead,
 			'logoUrl'       => (string) ($mod->logoUrl ?? ''),
 			'brandColor'    => (string) ($mod->brandColor ?? '#7d0a3d'),
@@ -244,7 +252,7 @@ class PLMailService extends Wire {
 		);
 		$m->subject(((string) ($mod->subjectPrefix ?? '')) . $subject);
 		$m->bodyHTML($html);
-		$m->body($lead);
+		$m->body($lead . ($userEditUrl !== '' ? "\n\n" . $userEditUrl : ''));
 
 		try {
 			$sent = (bool) $m->send();
