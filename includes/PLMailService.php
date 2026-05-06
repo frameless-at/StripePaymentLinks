@@ -232,6 +232,7 @@ class PLMailService extends Wire {
 			'productTitle'  => (string) ($data['product'] ?? ''),
 			'productUrl'    => $userEditUrl,
 			'ctaText'       => '',
+			'linkText'      => $userEditUrl !== '' ? (string) $mod->t('withdrawal.mail.admin.link_text') : '',
 			'leadText'      => $lead,
 			'logoUrl'       => (string) ($mod->logoUrl ?? ''),
 			'brandColor'    => (string) ($mod->brandColor ?? '#7d0a3d'),
