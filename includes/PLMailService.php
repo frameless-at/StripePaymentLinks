@@ -228,19 +228,18 @@ class PLMailService extends Wire {
 		$lead    = strtr((string) $mod->t('withdrawal.mail.admin.body'),    $repl);
 
 		$vars = [
-			'preheader'      => $subject,
-			'productTitle'   => (string) ($data['product'] ?? ''),
-			'productUrl'     => $userEditUrl,
-			'ctaText'        => $userEditUrl !== '' ? (string) $mod->t('withdrawal.mail.admin.cta_user') : '',
-			'hideDirectLink' => true,
-			'leadText'       => $lead,
-			'logoUrl'        => (string) ($mod->logoUrl ?? ''),
-			'brandColor'     => (string) ($mod->brandColor ?? '#7d0a3d'),
-			'fromName'       => (string) ($mod->mailFromName ?? ($config->siteName ?? $config->httpHost ?? 'Website')),
-			'brandHeader'    => (string) ($mod->mailHeaderName ?? ''),
-			'headerTagline'  => $mod->t('withdrawal.mail.receipt.tagline'),
-			'headline'       => $mod->t('withdrawal.mail.admin.headline'),
-			'footerNote'     => $mod->t('mail.common.footer_note'),
+			'preheader'     => $subject,
+			'productTitle'  => (string) ($data['product'] ?? ''),
+			'productUrl'    => $userEditUrl,
+			'ctaText'       => '',
+			'leadText'      => $lead,
+			'logoUrl'       => (string) ($mod->logoUrl ?? ''),
+			'brandColor'    => (string) ($mod->brandColor ?? '#7d0a3d'),
+			'fromName'      => (string) ($mod->mailFromName ?? ($config->siteName ?? $config->httpHost ?? 'Website')),
+			'brandHeader'   => (string) ($mod->mailHeaderName ?? ''),
+			'headerTagline' => $mod->t('withdrawal.mail.receipt.tagline'),
+			'headline'      => $mod->t('withdrawal.mail.admin.headline'),
+			'footerNote'    => $mod->t('mail.common.footer_note'),
 		];
 
 		$html = $this->renderLayout($mod->mailLayoutPath(), $vars);
