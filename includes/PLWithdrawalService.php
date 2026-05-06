@@ -429,8 +429,8 @@ final class PLWithdrawalService extends Wire
 	{
 		$mod = $this->mod;
 		$h = fn($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
-		$path = trim((string) ($mod->privacyPagePath ?? ''));
-		$privacy = $path !== '' ? $mod->wire('pages')->get($path) : null;
+		$pageId = (int) ($mod->privacyPage ?? 0);
+		$privacy = $pageId > 0 ? $mod->wire('pages')->get($pageId) : null;
 		$link = ($privacy && $privacy->id)
 			? '<a href="' . $h($privacy->url) . '">' . $h($mod->t('withdrawal.privacy.link_label')) . '</a>'
 			: $h($mod->t('withdrawal.privacy.link_label'));
