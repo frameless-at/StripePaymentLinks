@@ -62,6 +62,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 
 			// Withdrawal (FAGG / EU 2023/2673)
 			'withdrawalNotificationEmail' => '',
+			'privacyPagePath'             => '/datenschutz/',
 		];
 	}
 
@@ -528,8 +529,20 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			$notify->label = 'Internal notification email';
 			$notify->description = 'Receives an internal notification on each new withdrawal.';
 			$notify->notes = 'Empty = falls back to $config->adminEmail.';
+			$notify->columnWidth = 50;
 			$notify->attr('value', (string) $this->get('withdrawalNotificationEmail'));
 			$fsW->add($notify);
+
+			/** @var \ProcessWire\InputfieldText $priv */
+			$priv = $this->modules->get('InputfieldText');
+			$priv->name  = 'privacyPagePath';
+			$priv->label = 'Privacy policy page path';
+			$priv->description = 'Path to the privacy policy page on this site (used as the GDPR link in the withdrawal form).';
+			$priv->notes = 'Default: /datenschutz/. Empty = label is shown without a link.';
+			$priv->columnWidth = 50;
+			$priv->placeholder = '/datenschutz/';
+			$priv->attr('value', (string) $this->get('privacyPagePath'));
+			$fsW->add($priv);
 
 		$inputfields->add($fsW);
 

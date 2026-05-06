@@ -34,7 +34,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	public static function getModuleInfo(): array {
 		return [
 			'title'       => 'StripePaymentLinks',
-			'version'     => '1.0.26',
+			'version'     => '1.1.0',
 			'summary'     => 'Stripe payment-link redirects, user/purchases, magic link, mails, modals.',
 			'author'      => 'frameless Media',
 			'href'        => 'https://github.com/frameless-at/StripePaymentLinks',
@@ -283,7 +283,6 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			$this->ensureProductFields($data['productTemplateNames'] ?? null);
 			$this->ensureCustomerRoleExists();
 			$this->ensureWithdrawalFields();
-			$this->cleanupLegacyWithdrawalPages();
 			$this->triggerSyncStripeCustomers($data);
 			$this->triggerMagicLinks($data);
 			$this->triggerAccountMerge($data);
@@ -328,7 +327,6 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		$this->ensureProductFields();
 		$this->ensureCustomerRoleExists();
 		$this->ensureWithdrawalFields();
-		$this->cleanupLegacyWithdrawalPages();
 	}
 
 
@@ -344,7 +342,6 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		$this->ensureProductFields();
 		$this->ensureCustomerRoleExists();
 		$this->ensureWithdrawalFields();
-		$this->cleanupLegacyWithdrawalPages();
 	}
 	
 	/**
@@ -1697,47 +1694,13 @@ public function processCheckout(Page $currentPage): void {
 			'label' => 'Status', 'columnWidth' => 50, 'inputfieldClass' => 'InputfieldSelect',
 		]);
 		if ($fStatus && $fStatus->id && $fStatus->type instanceof \ProcessWire\FieldtypeOptions) {
-			$manager = $fStatus->type->manager;
-			$optionsString = "received|Received\nverified-valid|Verified valid\nverified-invalid|Verified invalid\ncompleted|Completed";
-
-			$existing = $manager->getOptions($fStatus);
-
-			if ($existing->count() === 0) {
-				// First-time setup
-				$manager->setOptionsString($fStatus, $optionsString, true);
-			} else {
-				// Cleanup duplicates created by earlier module versions: setOptionsString
-				// matches existing options by ID, not by value — calling it without IDs
-				// (as we did) appended new options on every save instead of dedup'ing.
-				// Strategy: per value, keep the option with the lowest ID, remap any
-				// page references from a duplicate ID to the kept ID, then delete dups.
-				$byValue = [];
-				foreach ($existing as $opt) {
-					$byValue[(string)$opt->value][] = (int)$opt->id;
-				}
-				$idRemap   = [];
-				$deleteIds = [];
-				foreach ($byValue as $value => $ids) {
-					sort($ids);
-					$keep = $ids[0];
-					for ($i = 1, $n = count($ids); $i < $n; $i++) {
-						$idRemap[$ids[$i]] = $keep;
-						$deleteIds[]       = $ids[$i];
-					}
-				}
-				if (!empty($idRemap)) {
-					$database = $this->wire('database');
-					$table    = $database->escapeTable('field_' . $fStatus->name);
-					foreach ($idRemap as $oldId => $newId) {
-						$stmt = $database->prepare("UPDATE `$table` SET data=:newId WHERE data=:oldId");
-						$stmt->execute([':newId' => $newId, ':oldId' => $oldId]);
-					}
-					$dupOpts = $manager->getOptionsByID($fStatus, $deleteIds);
-					if ($dupOpts && $dupOpts->count()) {
-						$manager->deleteOptions($fStatus, $dupOpts);
-					}
-					$this->wire('log')->save(self::LOG_PL, '[WITHDRAWAL] Cleaned up ' . count($idRemap) . ' duplicate status options');
-				}
+			// Set options only on first install — setOptionsString() matches options
+			// by ID, not by value, so calling it again would append duplicates.
+			if ($fStatus->type->manager->getOptions($fStatus)->count() === 0) {
+				$fStatus->type->manager->setOptionsString($fStatus,
+					"received|Received\nverified-valid|Verified valid\nverified-invalid|Verified invalid\ncompleted|Completed",
+					true
+				);
 			}
 		}
 
@@ -1756,28 +1719,6 @@ public function processCheckout(Page $currentPage): void {
 		if (!$userFg->has($withdrawals)) {
 			$userFg->add($withdrawals);
 			$userFg->save();
-		}
-	}
-
-	/**
-	 * Removes /withdrawal/ and /withdrawal/confirm/ pages that earlier
-	 * versions of this module auto-created. The withdrawal flow is now
-	 * delivered as Bootstrap modals — no dedicated pages needed.
-	 *
-	 * @return void
-	 */
-	protected function cleanupLegacyWithdrawalPages(): void {
-		$pages = $this->wire('pages');
-		foreach (['/withdrawal/confirm/', '/withdrawal/'] as $path) {
-			$p = $pages->get($path);
-			if ($p && $p->id) {
-				try {
-					$pages->delete($p, true);
-					$this->wire('log')->save(self::LOG_PL, '[WITHDRAWAL] Removed legacy page: ' . $path);
-				} catch (\Throwable $e) {
-					$this->wire('log')->save(self::LOG_PL, '[WITHDRAWAL] Failed to remove legacy page ' . $path . ': ' . $e->getMessage());
-				}
-			}
 		}
 	}
 

@@ -325,7 +325,7 @@ This ensures the module’s modals, buttons, and notices render correctly, even 
 - ~~Support for multiple webhooks~~ since v1.0.19
 - ~~Grant users free product access~~ since v1.0.23
 - ~~Multi-email account merge tool~~ since v1.0.25
-- ~~Electronic withdrawal function per EU Directive 2023/2673 / § 13a FAGG~~ since v1.0.26
+- ~~Electronic withdrawal function per EU Directive 2023/2673 / § 13a FAGG~~ since v1.1.0
 - Optional framework support (UIkit / Tailwind) via JSON view mappings
 - Add more payment providers (Mollie, PayPal, …)
 

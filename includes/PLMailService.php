@@ -137,9 +137,6 @@ class PLMailService extends Wire {
 	 * ===================================================================*/
 	public function sendWithdrawalReceiptMail(StripePaymentLinks $mod, array $data): bool
 	{
-		$mail   = wire('mail');
-		$config = wire('config');
-
 		$to = trim((string) ($data['email'] ?? ''));
 		if ($to === '') return false;
 
@@ -151,47 +148,21 @@ class PLMailService extends Wire {
 			'{order_date}'  => trim((string) ($data['order_date'] ?? '')) !== '' ? (string) $data['order_date'] : '—',
 			'{received_at}' => date('Y-m-d H:i'),
 		];
-
 		$lead = strtr((string) $mod->t('withdrawal.mail.receipt.body'), $repl);
 
-		$vars = [
+		$vars = $this->brandedMailVars($mod, [
 			'preheader'     => $mod->t('withdrawal.mail.receipt.preheader'),
 			'firstname'     => (string) ($data['name'] ?? ''),
 			'productTitle'  => (string) ($data['product'] ?? ''),
-			'productUrl'    => '',
-			'ctaText'       => '',
 			'leadText'      => $lead,
-			'logoUrl'       => (string) ($mod->logoUrl ?? ''),
-			'brandColor'    => (string) ($mod->brandColor ?? '#7d0a3d'),
-			'fromName'      => (string) ($mod->mailFromName ?? ($config->siteName ?? $config->httpHost ?? 'Website')),
-			'brandHeader'   => (string) ($mod->mailHeaderName ?? ''),
 			'headerTagline' => $mod->t('withdrawal.mail.receipt.tagline'),
 			'headline'      => $mod->t('withdrawal.mail.receipt.headline'),
-			'footerNote'    => $mod->t('mail.common.footer_note'),
 			'closingText'   => $mod->t('withdrawal.mail.receipt.closing'),
 			'signatureName' => (string) ($mod->mailSignatureName ?? $mod->mailFromName ?? ''),
-		];
+		]);
 
-		$html = $this->renderLayout($mod->mailLayoutPath(), $vars);
-
-		$m = $mail->new();
-		$m->to($to);
-		$m->from(
-			(string) ($mod->mailFromEmail ?? ($config->adminEmail ?? 'no-reply@' . ($config->httpHost ?? 'localhost'))),
-			$vars['fromName']
-		);
-		$m->subject(((string) ($mod->subjectPrefix ?? '')) . $mod->t('withdrawal.mail.receipt.subject'));
-		$m->bodyHTML($html);
-		$m->body($lead . "\n\n" . $vars['closingText'] . "\n" . $vars['signatureName'] . "\n");
-
-		try {
-			$sent = (bool) $m->send();
-			$mod->wire('log')->save('mail', ($sent ? '[OK]' : '[ERROR]') . ' Withdrawal receipt mail to ' . $to);
-			return $sent;
-		} catch (\Throwable $e) {
-			$mod->wire('log')->save('mail', '[ERROR] Withdrawal receipt mail send error: ' . $e->getMessage());
-			return false;
-		}
+		$plain = $lead . "\n\n" . $vars['closingText'] . "\n" . $vars['signatureName'] . "\n";
+		return $this->sendBrandedMail($mod, $to, $mod->t('withdrawal.mail.receipt.subject'), $vars, $plain, 'Withdrawal receipt');
 	}
 
 	/* =====================================================================
@@ -199,7 +170,6 @@ class PLMailService extends Wire {
 	 * ===================================================================*/
 	public function sendWithdrawalAdminMail(StripePaymentLinks $mod, array $data, ?\ProcessWire\User $user = null): bool
 	{
-		$mail   = wire('mail');
 		$config = wire('config');
 
 		$to = trim((string) ($mod->withdrawalNotificationEmail ?? ''));
@@ -223,25 +193,58 @@ class PLMailService extends Wire {
 			'{reason}'      => trim((string) ($data['reason'] ?? '')) !== '' ? (string) $data['reason'] : '—',
 			'{user_status}' => $userStatus,
 		];
-
 		$subject = strtr((string) $mod->t('withdrawal.mail.admin.subject'), $repl);
 		$lead    = strtr((string) $mod->t('withdrawal.mail.admin.body'),    $repl);
 
-		$vars = [
+		$vars = $this->brandedMailVars($mod, [
 			'preheader'     => $subject,
 			'productTitle'  => (string) ($data['product'] ?? ''),
 			'productUrl'    => $userEditUrl,
-			'ctaText'       => '',
 			'linkText'      => $userEditUrl !== '' ? (string) $mod->t('withdrawal.mail.admin.link_text') : '',
 			'leadText'      => $lead,
+			'headerTagline' => $mod->t('withdrawal.mail.receipt.tagline'),
+			'headline'      => $mod->t('withdrawal.mail.admin.headline'),
+		]);
+
+		$plain = $lead . ($userEditUrl !== '' ? "\n\n" . $userEditUrl : '');
+		return $this->sendBrandedMail($mod, $to, $subject, $vars, $plain, 'Withdrawal admin notification');
+	}
+
+	/**
+	 * Merge per-mail variables with the module's brand defaults.
+	 * Caller supplies overrides; this fills in logoUrl, brandColor, fromName, etc.
+	 */
+	private function brandedMailVars(StripePaymentLinks $mod, array $overrides): array
+	{
+		$config = wire('config');
+		$defaults = [
+			'preheader'     => '',
+			'firstname'     => '',
+			'productTitle'  => '',
+			'productUrl'    => '',
+			'ctaText'       => '',
+			'linkText'      => '',
+			'leadText'      => '',
 			'logoUrl'       => (string) ($mod->logoUrl ?? ''),
 			'brandColor'    => (string) ($mod->brandColor ?? '#7d0a3d'),
 			'fromName'      => (string) ($mod->mailFromName ?? ($config->siteName ?? $config->httpHost ?? 'Website')),
 			'brandHeader'   => (string) ($mod->mailHeaderName ?? ''),
-			'headerTagline' => $mod->t('withdrawal.mail.receipt.tagline'),
-			'headline'      => $mod->t('withdrawal.mail.admin.headline'),
+			'headerTagline' => '',
+			'headline'      => '',
 			'footerNote'    => $mod->t('mail.common.footer_note'),
+			'closingText'   => '',
+			'signatureName' => '',
 		];
+		return array_merge($defaults, $overrides);
+	}
+
+	/**
+	 * Send a branded mail using the shared layout. Returns true on success.
+	 */
+	private function sendBrandedMail(StripePaymentLinks $mod, string $to, string $subject, array $vars, string $plainBody, string $logLabel): bool
+	{
+		$mail   = wire('mail');
+		$config = wire('config');
 
 		$html = $this->renderLayout($mod->mailLayoutPath(), $vars);
 
@@ -253,14 +256,14 @@ class PLMailService extends Wire {
 		);
 		$m->subject(((string) ($mod->subjectPrefix ?? '')) . $subject);
 		$m->bodyHTML($html);
-		$m->body($lead . ($userEditUrl !== '' ? "\n\n" . $userEditUrl : ''));
+		$m->body($plainBody);
 
 		try {
 			$sent = (bool) $m->send();
-			$mod->wire('log')->save('mail', ($sent ? '[OK]' : '[ERROR]') . ' Withdrawal admin notification to ' . $to);
+			$mod->wire('log')->save('mail', ($sent ? '[OK] ' : '[ERROR] ') . $logLabel . ' to ' . $to);
 			return $sent;
 		} catch (\Throwable $e) {
-			$mod->wire('log')->save('mail', '[ERROR] Withdrawal admin mail send error: ' . $e->getMessage());
+			$mod->wire('log')->save('mail', '[ERROR] ' . $logLabel . ' send error: ' . $e->getMessage());
 			return false;
 		}
 	}
