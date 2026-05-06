@@ -521,7 +521,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		$fsW->label = 'Withdrawal (FAGG / EU 2023/2673)';
 		$fsW->name  = 'pl_withdrawal';
 		$fsW->collapsed = Inputfield::collapsedYes;
-		$fsW->description = 'Electronic withdrawal function ("Vertrag widerrufen") for B2C distance contracts. Effective June 19, 2026. Delivered as Bootstrap modals on every frontend page. Trigger via a footer link with data-bs-target="#withdrawalFormModal".';
+		$fsW->description = 'Electronic withdrawal function for B2C distance contracts. Effective June 19, 2026. Delivered as Bootstrap modals on every frontend page. Trigger via a footer link with data-bs-target="#withdrawalFormModal".';
 
 			/** @var \ProcessWire\InputfieldEmail $notify */
 			$notify = $this->modules->get('InputfieldEmail');
