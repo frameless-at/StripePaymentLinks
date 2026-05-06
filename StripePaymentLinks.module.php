@@ -227,7 +227,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		'withdrawal.mail.receipt.subject'    => $this->_('Receipt of your withdrawal'),
 		'withdrawal.mail.receipt.preheader'  => $this->_('We received your withdrawal declaration.'),
 		'withdrawal.mail.receipt.headline'   => $this->_('Withdrawal received'),
-		'withdrawal.mail.receipt.body'       => $this->_("Hello {name},\n\nwe have received your withdrawal of the following contract:\n\n  Product:     {product}\n  Order no.:   {order_id}\n  Order date:  {order_date}\n\nReceived on:   {received_at}\n\nWe will review your withdrawal and reply within 5 business days with the next steps.\n\nThis email serves as your confirmation of receipt on a durable medium pursuant to § 13a Abs 4 FAGG.\n\nIf you have questions, please reply to this email."),
+		'withdrawal.mail.receipt.body'       => $this->_("Hello {name},\n\nwe have received your withdrawal of the following contract:\n\n  Product:     {product}\n  Order no.:   {order_id}\n  Order date:  {order_date}\n\nReceived on:   {received_at}\n\nWe will review your withdrawal and reply within 5 business days with the next steps.\n\nThis email serves as your confirmation of receipt on a durable medium pursuant to § 13a Abs 4 FAGG."),
 		'withdrawal.mail.receipt.closing'    => $this->_('Best regards'),
 		'withdrawal.mail.receipt.tagline'    => $this->_('Withdrawal'),
 
