@@ -1692,10 +1692,48 @@ public function processCheckout(Page $currentPage): void {
 			'label' => 'Status', 'columnWidth' => 50, 'inputfieldClass' => 'InputfieldSelect',
 		]);
 		if ($fStatus && $fStatus->id && $fStatus->type instanceof \ProcessWire\FieldtypeOptions) {
-			$fStatus->type->manager->setOptionsString($fStatus,
-				"received|Received\nverified-valid|Verified valid\nverified-invalid|Verified invalid\ncompleted|Completed",
-				true
-			);
+			$manager = $fStatus->type->manager;
+			$optionsString = "received|Received\nverified-valid|Verified valid\nverified-invalid|Verified invalid\ncompleted|Completed";
+
+			$existing = $manager->getOptions($fStatus);
+
+			if ($existing->count() === 0) {
+				// First-time setup
+				$manager->setOptionsString($fStatus, $optionsString, true);
+			} else {
+				// Cleanup duplicates created by earlier module versions: setOptionsString
+				// matches existing options by ID, not by value — calling it without IDs
+				// (as we did) appended new options on every save instead of dedup'ing.
+				// Strategy: per value, keep the option with the lowest ID, remap any
+				// page references from a duplicate ID to the kept ID, then delete dups.
+				$byValue = [];
+				foreach ($existing as $opt) {
+					$byValue[(string)$opt->value][] = (int)$opt->id;
+				}
+				$idRemap   = [];
+				$deleteIds = [];
+				foreach ($byValue as $value => $ids) {
+					sort($ids);
+					$keep = $ids[0];
+					for ($i = 1, $n = count($ids); $i < $n; $i++) {
+						$idRemap[$ids[$i]] = $keep;
+						$deleteIds[]       = $ids[$i];
+					}
+				}
+				if (!empty($idRemap)) {
+					$database = $this->wire('database');
+					$table    = $database->escapeTable('field_' . $fStatus->name);
+					foreach ($idRemap as $oldId => $newId) {
+						$stmt = $database->prepare("UPDATE `$table` SET data=:newId WHERE data=:oldId");
+						$stmt->execute([':newId' => $newId, ':oldId' => $oldId]);
+					}
+					$dupOpts = $manager->getOptionsByID($fStatus, $deleteIds);
+					if ($dupOpts && $dupOpts->count()) {
+						$manager->deleteOptions($fStatus, $dupOpts);
+					}
+					$this->wire('log')->save(self::LOG_PL, '[WITHDRAWAL] Cleaned up ' . count($idRemap) . ' duplicate status options');
+				}
+			}
 		}
 
 		$fConfSent   = $ensure('spl_withdrawal_confirmation_sent',     'FieldtypeCheckbox', ['label' => 'Receipt confirmation sent', 'columnWidth' => 50]);
