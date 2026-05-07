@@ -182,11 +182,11 @@ class PLMailService extends Wire {
 	}
 
 	/* =====================================================================
-	 * FAGG order-confirmation block (right of withdrawal / waiver)
+	 * Order-confirmation consumer-rights block (withdrawal / waiver)
 	 * ===================================================================*/
 
 	/**
-	 * Build the FAGG-mandated block for an order-confirmation mail.
+	 * Build the consumer-rights block of the order-confirmation mail.
 	 * Splits the mapped items into withdrawal-type groups and renders one
 	 * sub-block per group:
 	 *   - 'service_redeemable' → instructions + model form + online-link

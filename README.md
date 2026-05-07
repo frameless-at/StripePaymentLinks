@@ -220,12 +220,12 @@ This makes it easy to audit or re-import purchases safely.
 
 ---
 
-## Withdrawal / Right of Withdrawal (FAGG / EU 2023/2673)
+## Right of withdrawal
 
-The module ships an electronic withdrawal function ("Vertrag widerrufen")
-required for B2C distance contracts in Austria/EU effective June 19, 2026.
-Delivered as a three-step **Bootstrap modal flow** rendered on every
-frontend page — no dedicated pages, no template choice, no theme rewrite.
+The module ships an electronic withdrawal function for B2C distance
+contracts. Delivered as a three-step **Bootstrap modal flow** rendered
+on every frontend page — no dedicated pages, no template choice, no
+theme rewrite.
 
 ### What the module does
 
@@ -242,7 +242,7 @@ frontend page — no dedicated pages, no template choice, no theme rewrite.
   - if no user matches → no repeater item is created, but the admin still
     gets the notification mail;
   - in both cases, a receipt confirmation mail is sent to the consumer
-    (durable medium per § 13a Abs 4 FAGG) and an internal notification
+    (durable medium) and an internal notification
     mail is sent to the admin.
 - Withdrawals are reachable without login.
 - HMAC-SHA-256 IP hash (peppered with `$config->userAuthSalt`), CSRF,
@@ -291,8 +291,7 @@ include that placeholder.
 
 The module ships **no hardcoded legal wording** — it deliberately stays
 jurisdiction-neutral. You write the texts that match your jurisdiction
-(Austria FAGG, Germany BGB, France Code de la consommation, …) once in
-the module config and they appear in every confirmation mail.
+once in the module config and they appear in every confirmation mail.
 
 ### Available placeholders inside the texts
 
@@ -314,7 +313,7 @@ directly — no placeholder needed.
 
 ### Setup
 
-1. In **Withdrawal (FAGG / EU 2023/2673)**:
+1. In **Withdrawal**:
    - **Privacy policy page** (page selector)
    - **Terms and Conditions page** (page selector)
    - **Contact email for withdrawal** (used inside the `{contact_email}`
@@ -400,8 +399,8 @@ This ensures the module’s modals, buttons, and notices render correctly, even 
 - ~~Support for multiple webhooks~~ since v1.0.19
 - ~~Grant users free product access~~ since v1.0.23
 - ~~Multi-email account merge tool~~ since v1.0.25
-- ~~Electronic withdrawal function per EU Directive 2023/2673 / § 13a FAGG~~ since v1.1.0
-- ~~FAGG-compliant order-confirmation mail (§ 7 Abs 3 FAGG) — withdrawal instructions + model form for redeemable products, waiver acknowledgment for digital-immediate products~~ since v1.2.0
+- ~~Electronic withdrawal function (modal flow + audit log)~~ since v1.1.0
+- ~~Order-confirmation mail with consumer-rights block — withdrawal instructions for redeemable products, waiver acknowledgment for digital-immediate products~~ since v1.2.0
 - Optional framework support (UIkit / Tailwind) via JSON view mappings
 - Add more payment providers (Mollie, PayPal, …)
 

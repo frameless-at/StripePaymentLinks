@@ -64,7 +64,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			'pl_merge_test' => true,
 			'pl_merge_run'  => false,
 
-			// Withdrawal (FAGG / EU 2023/2673)
+			// Withdrawal
 			'withdrawalNotificationEmail' => '',
 			'withdrawalContactEmail'      => '',
 			'privacyPage'                 => 0,
@@ -545,13 +545,13 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		$inputfields->add($fsMerge);
 
 		/** -----------------------
-		 *  Withdrawal (FAGG / EU 2023/2673)
+		 *  Withdrawal / right of withdrawal
 		 *  ----------------------*/
 		$fsW = $this->modules->get('InputfieldFieldset');
-		$fsW->label = 'Withdrawal (FAGG / EU 2023/2673)';
+		$fsW->label = 'Withdrawal';
 		$fsW->name  = 'pl_withdrawal';
 		$fsW->collapsed = Inputfield::collapsedYes;
-		$fsW->description = 'Electronic withdrawal function for B2C distance contracts. Effective June 19, 2026. Delivered as Bootstrap modals on every frontend page.';
+		$fsW->description = 'Electronic withdrawal function for B2C distance contracts. Delivered as Bootstrap modals on every frontend page.';
 
 			/** @var \ProcessWire\InputfieldEmail $notify */
 			$notify = $this->modules->get('InputfieldEmail');
@@ -577,7 +577,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			$terms = $this->modules->get('InputfieldPageListSelect');
 			$terms->name  = 'termsPage';
 			$terms->label = 'Terms and Conditions page';
-			$terms->description = 'Page linked from FAGG order-confirmation mails as "AGB / Terms and Conditions".';
+			$terms->description = 'Page linked from order-confirmation mails as "Terms and Conditions".';
 			$terms->columnWidth = 50;
 			$terms->parent_id = 1;
 			$terms->attr('value', (int) $this->get('termsPage'));
@@ -587,7 +587,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			$wdContact = $this->modules->get('InputfieldEmail');
 			$wdContact->name  = 'withdrawalContactEmail';
 			$wdContact->label = 'Contact email for withdrawal';
-			$wdContact->description = 'Address shown in FAGG instructions / model withdrawal form.';
+			$wdContact->description = 'Address shown in withdrawal instructions and used inside the {contact_email} / {withdrawal_mail} placeholders.';
 			$wdContact->notes = 'Empty = falls back to the sender email above.';
 			$wdContact->columnWidth = 100;
 			$wdContact->attr('value', (string) $this->get('withdrawalContactEmail'));

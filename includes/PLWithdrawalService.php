@@ -5,7 +5,7 @@ use ProcessWire\Wire;
 /**
  * PLWithdrawalService
  *
- * FAGG / EU 2023/2673 electronic withdrawal flow as Bootstrap modals:
+ * Electronic withdrawal flow as Bootstrap modals:
  *  - withdrawalFormModal       — step 1: form fields
  *  - withdrawalConfirmModal    — step 2: review + explicit confirm checkbox
  *  - withdrawalSuccessModal    — step 3: receipt confirmation

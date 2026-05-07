@@ -243,7 +243,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		'withdrawal.mail.receipt.subject'    => $this->_('Receipt of your withdrawal'),
 		'withdrawal.mail.receipt.preheader'  => $this->_('We received your withdrawal declaration.'),
 		'withdrawal.mail.receipt.headline'   => $this->_('Withdrawal received'),
-		'withdrawal.mail.receipt.body'       => $this->_("Hello {name},\n\nwe have received your withdrawal of the following contract:\n\n  Product:     {product}\n  Order no.:   {order_id}\n  Order date:  {order_date}\n\nReceived on:   {received_at}\n\nWe will review your withdrawal and reply within 5 business days with the next steps.\n\nThis email serves as your confirmation of receipt on a durable medium pursuant to § 13a Abs 4 FAGG."),
+		'withdrawal.mail.receipt.body'       => $this->_("Hello {name},\n\nwe have received your withdrawal of the following contract:\n\n  Product:     {product}\n  Order no.:   {order_id}\n  Order date:  {order_date}\n\nReceived on:   {received_at}\n\nWe will review your withdrawal and reply within 5 business days with the next steps.\n\nThis email serves as your confirmation of receipt on a durable medium."),
 		'withdrawal.mail.receipt.closing'    => $this->_('Best regards'),
 		'withdrawal.mail.receipt.tagline'    => $this->_('Withdrawal'),
 
@@ -1577,16 +1577,16 @@ public function processCheckout(Page $currentPage): void {
 	}
 
 	/**
-	 * Classify a product's FAGG / right-of-withdrawal category for use in
-	 * the order-confirmation mail.
+	 * Classify a product's right-of-withdrawal category for use in the
+	 * order-confirmation mail.
 	 *
 	 *  - 'digital_immediate'  — gated product (requires_access=1): digital
-	 *                           content with immediate access, § 18 Abs 1 Z 11
-	 *                           FAGG waiver applies.
+	 *                           content with immediate access; consumer-side
+	 *                           waiver of the right of withdrawal applies.
 	 *  - 'service_redeemable' — non-gated product, product without a PW page,
 	 *                           or null: full right of withdrawal applies;
-	 *                           FAGG instructions + online-withdrawal link
-	 *                           must be shown.
+	 *                           withdrawal instructions + online-withdrawal
+	 *                           link must be shown.
 	 *
 	 * @param Page|null $product
 	 * @return string 'digital_immediate' | 'service_redeemable'
