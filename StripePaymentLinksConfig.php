@@ -64,7 +64,9 @@ class StripePaymentLinksConfig extends ModuleConfig {
 
 			// Withdrawal (FAGG / EU 2023/2673)
 			'withdrawalNotificationEmail' => '',
+			'withdrawalContactEmail'      => '',
 			'privacyPage'                 => 0,
+			'termsPage'                   => 0,
 		];
 	}
 
@@ -568,6 +570,26 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			$priv->parent_id = 1;
 			$priv->attr('value', (int) $this->get('privacyPage'));
 			$fsW->add($priv);
+
+			/** @var \ProcessWire\InputfieldPageListSelect $terms */
+			$terms = $this->modules->get('InputfieldPageListSelect');
+			$terms->name  = 'termsPage';
+			$terms->label = 'Terms and Conditions page';
+			$terms->description = 'Page linked from FAGG order-confirmation mails as "AGB / Terms and Conditions".';
+			$terms->columnWidth = 50;
+			$terms->parent_id = 1;
+			$terms->attr('value', (int) $this->get('termsPage'));
+			$fsW->add($terms);
+
+			/** @var \ProcessWire\InputfieldEmail $wdContact */
+			$wdContact = $this->modules->get('InputfieldEmail');
+			$wdContact->name  = 'withdrawalContactEmail';
+			$wdContact->label = 'Contact email for withdrawal';
+			$wdContact->description = 'Address shown in FAGG instructions / model withdrawal form.';
+			$wdContact->notes = 'Empty = falls back to the sender email above.';
+			$wdContact->columnWidth = 100;
+			$wdContact->attr('value', (string) $this->get('withdrawalContactEmail'));
+			$fsW->add($wdContact);
 
 		$inputfields->add($fsW);
 

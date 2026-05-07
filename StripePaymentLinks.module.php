@@ -34,7 +34,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	public static function getModuleInfo(): array {
 		return [
 			'title'       => 'StripePaymentLinks',
-			'version'     => '1.1.0',
+			'version'     => '1.2.0',
 			'summary'     => 'Stripe payment-link redirects, user/purchases, magic link, mails, modals.',
 			'author'      => 'frameless Media',
 			'href'        => 'https://github.com/frameless-at/StripePaymentLinks',
@@ -174,6 +174,26 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		// ===== JS/AJAX error texts =====
 		'ui.ajax.error_generic'     => $this->_('Error'),
 		'ui.ajax.error_server'      => $this->_('Server error.'),
+
+		// ===== MAIL: FAGG-mandated order-confirmation blocks =====
+		'mail.fagg.durable_medium_notice'    => $this->_('This email is your order confirmation pursuant to § 7 Abs 3 FAGG on a durable medium.'),
+		'mail.fagg.terms_link_label'         => $this->_('Terms and Conditions'),
+
+		// Service / redeemable product (full withdrawal right)
+		'mail.fagg.withdrawal_section_title' => $this->_('Right of withdrawal'),
+		'mail.fagg.withdrawal_instructions'  => $this->_("You have the right to withdraw from this contract within 14 days without giving any reason. The withdrawal period expires 14 days from the day of contract conclusion.\n\nTo exercise your right of withdrawal, please send us a clear declaration (e.g. by email to {contact_email}). You may use the model withdrawal form below, but it is not mandatory."),
+		'mail.fagg.withdrawal_form_title'    => $this->_('Model withdrawal form'),
+		'mail.fagg.withdrawal_form_body'     => $this->_("To: {provider}, {contact_email}\n\nI/We hereby give notice that I/we withdraw from my/our contract for the provision of the following service:\n\n— Ordered on: ____________\n— Name of consumer: ____________\n— Address of consumer: ____________\n— Signature of consumer (only if this form is notified on paper): ____________\n— Date: ____________"),
+		'mail.fagg.online_withdrawal_intro'  => $this->_('You can also declare your withdrawal electronically:'),
+		'mail.fagg.online_withdrawal_label'  => $this->_('Withdraw contract online'),
+		'mail.fagg.contact_for_withdrawal_label' => $this->_('Contact for withdrawal'),
+
+		// Digital immediate (waiver)
+		'mail.fagg.digital_waiver_title'     => $this->_('Waiver of right of withdrawal'),
+		'mail.fagg.digital_waiver_body'      => $this->_('By accepting our terms during ordering you expressly requested the immediate provision of digital content and acknowledged that you thereby lose your right of withdrawal pursuant to § 18 Abs 1 Z 11 FAGG.'),
+
+		// Affected products list (used inside both blocks when products mix)
+		'mail.fagg.affected_products_label'  => $this->_('Affected product(s):'),
 
 		// ===== WITHDRAWAL: form modal (step 1) =====
 		'withdrawal.form.title'           => $this->_('Withdraw contract'),
@@ -980,8 +1000,8 @@ public function processCheckout(Page $currentPage): void {
 		   $session->set('pl_access_links', $links);
 		 }
 	 
-		 if (!empty($links) && $this->shouldSendAccessMail($isNew)) {
-		   $this->mail()->sendAccessSummaryMail($this, $buyer, $links);
+		 if ($this->shouldSendAccessMail($isNew) && (!empty($links) || !empty($allMapped))) {
+		   $this->mail()->sendAccessSummaryMail($this, $buyer, $links, array_values($allMapped));
 		 }
 		 if ($alreadyDisallowed) $this->modal()->queueAlreadyPurchasedModal();
 	 
@@ -1550,6 +1570,26 @@ public function processCheckout(Page $currentPage): void {
 	 */
 	protected function productRequiresAccess(Page $product): bool {
 		return (bool)($product->get('requires_access') ?? false);
+	}
+
+	/**
+	 * Classify a product's FAGG / right-of-withdrawal category for use in
+	 * the order-confirmation mail.
+	 *
+	 *  - 'digital_immediate'  — gated product (requires_access=1): digital
+	 *                           content with immediate access, § 18 Abs 1 Z 11
+	 *                           FAGG waiver applies.
+	 *  - 'service_redeemable' — non-gated product, product without a PW page,
+	 *                           or null: full right of withdrawal applies;
+	 *                           FAGG instructions + online-withdrawal link
+	 *                           must be shown.
+	 *
+	 * @param Page|null $product
+	 * @return string 'digital_immediate' | 'service_redeemable'
+	 */
+	public function classifyWithdrawalType(?Page $product): string {
+		if (!$product || !$product->id) return 'service_redeemable';
+		return $this->productRequiresAccess($product) ? 'digital_immediate' : 'service_redeemable';
 	}
 
 /**

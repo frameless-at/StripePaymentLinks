@@ -11,7 +11,7 @@ class PLMailService extends Wire {
 	/* =====================================================================
 	 * ACCESS SUMMARY (1..n Produkte)
 	 * ===================================================================*/
-	public function sendAccessSummaryMail(StripePaymentLinks $mod, User $user, array $links): bool
+	public function sendAccessSummaryMail(StripePaymentLinks $mod, User $user, array $links, array $allMappedItems = []): bool
 	{
 		$mail   = wire('mail');
 		$config = wire('config');
@@ -43,9 +43,10 @@ class PLMailService extends Wire {
 				array_slice($links, 1)
 			) : [],
 			'extraNote'     => trim((string)($mod->mailExtraNote ?? '')),
+			'faggBlock'     => $this->buildFaggBlock($mod, $allMappedItems ?: $this->itemsFromLinks($mod, $links)),
 		];
-		$p = $mod->wire('pages')->get((int)$links[0]['id']);
-		if ($p && $p->hasField('access_mail_addon_txt')) {
+		$p = $links ? $mod->wire('pages')->get((int)$links[0]['id']) : null;
+		if ($p && $p->id && $p->hasField('access_mail_addon_txt')) {
 			$vars['leadText'] = trim((string)$p->access_mail_addon_txt) . "\n\n" . ($vars['leadText'] ?? '');
 		}
 		// for hooks
@@ -137,6 +138,144 @@ class PLMailService extends Wire {
 	/** Hookable: last-chance override of mail variables */
 	protected function ___alterAccessMailVars(array $vars, StripePaymentLinks $mod, User $user, array $links): array{
 		return $vars;
+	}
+
+	/* =====================================================================
+	 * FAGG order-confirmation block (right of withdrawal / waiver)
+	 * ===================================================================*/
+
+	/**
+	 * Build the FAGG-mandated block for an order-confirmation mail.
+	 * Splits the mapped items into withdrawal-type groups and renders one
+	 * sub-block per group:
+	 *   - 'service_redeemable' → instructions + model form + online-link
+	 *   - 'digital_immediate'  → waiver acknowledgment
+	 * Includes the universal "durable medium" notice + AGB link.
+	 *
+	 * @param StripePaymentLinks $mod
+	 * @param \ProcessWire\Page[] $items  Mapped product pages from the order.
+	 * @return string HTML (raw, intended for unescaped layout output).
+	 */
+	public function buildFaggBlock(StripePaymentLinks $mod, array $items): string
+	{
+		$h = fn($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
+		$brand = (string) ($mod->brandColor ?? '#7d0a3d');
+
+		// Group items by classification
+		$groups = ['service_redeemable' => [], 'digital_immediate' => []];
+		foreach ($items as $p) {
+			if (!$p instanceof \ProcessWire\Page || !$p->id) continue;
+			$type = $mod->classifyWithdrawalType($p);
+			if (!isset($groups[$type])) $groups[$type] = [];
+			$groups[$type][] = $p;
+		}
+
+		$out = '<div style="margin:24px 0 0 0;padding:18px 22px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px;font-size:14px;color:#374151;line-height:1.55;">';
+
+		// Universal: durable-medium notice + AGB link
+		$out .= '<p style="margin:0 0 10px 0;">' . $h($mod->t('mail.fagg.durable_medium_notice')) . '</p>';
+		$termsPage = (int) ($mod->termsPage ?? 0);
+		if ($termsPage > 0) {
+			$tp = $mod->wire('pages')->get($termsPage);
+			if ($tp && $tp->id) {
+				$out .= '<p style="margin:0 0 14px 0;"><a href="' . $h($tp->httpUrl) . '" style="color:' . $h($brand) . ';">'
+					  . $h($mod->t('mail.fagg.terms_link_label')) . '</a></p>';
+			}
+		}
+
+		// Group-specific blocks
+		if (!empty($groups['service_redeemable'])) {
+			$out .= $this->faggServiceBlock($mod, $groups['service_redeemable']);
+		}
+		if (!empty($groups['digital_immediate'])) {
+			$out .= $this->faggWaiverBlock($mod, $groups['digital_immediate']);
+		}
+
+		$out .= '</div>';
+		return $out;
+	}
+
+	private function faggServiceBlock(StripePaymentLinks $mod, array $pages): string
+	{
+		$h = fn($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
+		$config = wire('config');
+		$brand = (string) ($mod->brandColor ?? '#7d0a3d');
+
+		$contactEmail = trim((string) ($mod->withdrawalContactEmail ?? ''));
+		if ($contactEmail === '') {
+			$contactEmail = (string) ($mod->mailFromEmail ?? $config->adminEmail ?? '');
+		}
+		$provider = (string) ($mod->mailFromName ?? ($config->siteName ?? $config->httpHost ?? 'Provider'));
+
+		$repl = ['{contact_email}' => $contactEmail, '{provider}' => $provider];
+		$instructions = strtr((string) $mod->t('mail.fagg.withdrawal_instructions'), $repl);
+		$formBody     = strtr((string) $mod->t('mail.fagg.withdrawal_form_body'),    $repl);
+
+		$out  = '<hr style="border:none;border-top:1px solid #e5e7eb;margin:14px 0;">';
+		$out .= '<p style="margin:0 0 6px 0;font-weight:700;color:#111;">' . $h($mod->t('mail.fagg.withdrawal_section_title')) . '</p>';
+		$out .= '<p style="margin:0 0 10px 0;">' . $this->renderProductsLine($mod, $pages) . '</p>';
+		$out .= '<div style="white-space:pre-line;margin:0 0 12px 0;">' . $h($instructions) . '</div>';
+
+		// Online-withdrawal link (only for service_redeemable)
+		$out .= '<p style="margin:0 0 6px 0;">' . $h($mod->t('mail.fagg.online_withdrawal_intro')) . '</p>';
+		$wdPage = $mod->wire('pages')->get('/withdrawal/');
+		$wdUrl  = ($wdPage && $wdPage->id) ? $wdPage->httpUrl : '';
+		if ($wdUrl !== '') {
+			$out .= '<p style="margin:0 0 12px 0;"><a href="' . $h($wdUrl) . '" style="color:' . $h($brand) . ';">'
+				  . $h($mod->t('mail.fagg.online_withdrawal_label')) . '</a></p>';
+		}
+
+		// Contact for withdrawal
+		if ($contactEmail !== '') {
+			$out .= '<p style="margin:0 0 12px 0;">' . $h($mod->t('mail.fagg.contact_for_withdrawal_label')) . ': '
+				  . '<a href="mailto:' . $h($contactEmail) . '" style="color:' . $h($brand) . ';">' . $h($contactEmail) . '</a></p>';
+		}
+
+		// Model withdrawal form
+		$out .= '<p style="margin:14px 0 6px 0;font-weight:700;color:#111;">' . $h($mod->t('mail.fagg.withdrawal_form_title')) . '</p>';
+		$out .= '<div style="white-space:pre-line;font-family:monospace;font-size:13px;color:#374151;">' . $h($formBody) . '</div>';
+
+		return $out;
+	}
+
+	private function faggWaiverBlock(StripePaymentLinks $mod, array $pages): string
+	{
+		$h = fn($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
+
+		$out  = '<hr style="border:none;border-top:1px solid #e5e7eb;margin:14px 0;">';
+		$out .= '<p style="margin:0 0 6px 0;font-weight:700;color:#111;">' . $h($mod->t('mail.fagg.digital_waiver_title')) . '</p>';
+		$out .= '<p style="margin:0 0 6px 0;">' . $this->renderProductsLine($mod, $pages) . '</p>';
+		$out .= '<p style="margin:0;">' . $h($mod->t('mail.fagg.digital_waiver_body')) . '</p>';
+
+		return $out;
+	}
+
+	private function renderProductsLine(StripePaymentLinks $mod, array $pages): string
+	{
+		$h = fn($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
+		$titles = [];
+		foreach ($pages as $p) {
+			if ($p instanceof \ProcessWire\Page && $p->id) $titles[] = (string) $p->title;
+		}
+		if (!$titles) return '';
+		return '<em>' . $h($mod->t('mail.fagg.affected_products_label')) . '</em> ' . $h(implode(', ', $titles));
+	}
+
+	/**
+	 * Fallback: derive Page[] from the legacy $links payload (each item has 'id').
+	 * Used when sendAccessSummaryMail() is called without an explicit
+	 * $allMappedItems list (e.g. magic-link send).
+	 */
+	private function itemsFromLinks(StripePaymentLinks $mod, array $links): array
+	{
+		$items = [];
+		foreach ($links as $l) {
+			$id = (int) ($l['id'] ?? 0);
+			if ($id <= 0) continue;
+			$p = $mod->wire('pages')->get($id);
+			if ($p && $p->id) $items[] = $p;
+		}
+		return $items;
 	}
 
 	/* =====================================================================

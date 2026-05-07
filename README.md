@@ -274,6 +274,58 @@ page; the link above triggers the flow.
 
 ---
 
+## FAGG-Compliant Order-Confirmation Mail (§ 7 Abs 3 FAGG)
+
+Since v1.2.0 the order-confirmation mail (sent automatically after a
+successful Stripe checkout) carries the FAGG-mandated information for
+each purchased product, classified per product based on the existing
+`requires_access` flag:
+
+| `requires_access` | Mail block |
+|---|---|
+| `1` (gated digital content) | Waiver acknowledgment (§ 18 Abs 1 Z 11 FAGG) |
+| `0` or unset (services, vouchers, consultations) | Full withdrawal instructions + model withdrawal form + online-withdrawal link |
+
+Universal blocks (in every confirmation mail):
+
+- "Durable medium" notice (§ 7 Abs 3 FAGG)
+- Link to your **Terms and Conditions** page (`termsPage` config)
+- Link to your **Privacy policy** page (`privacyPage` config)
+
+### Setup
+
+1. In module config → **Withdrawal (FAGG / EU 2023/2673)**:
+   - **Privacy policy page** (page selector)
+   - **Terms and Conditions page** (page selector)
+   - **Contact email for withdrawal** (used in instructions + model form;
+     falls back to the sender email when empty)
+2. The German FAGG wording for instructions, model form, and waiver
+   acknowledgment is editable via the ProcessWire Translator. Translation
+   keys are under `mail.fagg.*`.
+
+### Custom mail layout?
+
+If you use an own mail layout (config option **Mail layout**), add a
+slot for the FAGG block. The module passes raw HTML in `$faggBlock`:
+
+```php
+<?php if ($has('faggBlock')): ?>
+<tr>
+  <td style="padding:0 22px 4px 22px;">
+    <?= $val('faggBlock') ?>
+  </td>
+</tr>
+<?php endif; ?>
+```
+
+Without this slot, your custom layout will not render the FAGG block.
+
+> ⚠️ **Compliance note**: Setting **Access mail after purchase** to
+> `never` disables the entire confirmation mail — including the FAGG
+> block. This is a config-level decision; the module does not override it.
+
+---
+
 ## Configuration
 
 - **Stripe Secret API Key**
@@ -326,6 +378,7 @@ This ensures the module’s modals, buttons, and notices render correctly, even 
 - ~~Grant users free product access~~ since v1.0.23
 - ~~Multi-email account merge tool~~ since v1.0.25
 - ~~Electronic withdrawal function per EU Directive 2023/2673 / § 13a FAGG~~ since v1.1.0
+- ~~FAGG-compliant order-confirmation mail (§ 7 Abs 3 FAGG) — withdrawal instructions + model form for redeemable products, waiver acknowledgment for digital-immediate products~~ since v1.2.0
 - Optional framework support (UIkit / Tailwind) via JSON view mappings
 - Add more payment providers (Mollie, PayPal, …)
 
