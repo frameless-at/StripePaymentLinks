@@ -178,7 +178,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		// ===== MAIL: order confirmation without gated access =====
 		'mail.order.subject'   => $this->_('Order confirmation'),
 		'mail.order.preheader' => $this->_('We have received your order.'),
-		'mail.order.title'     => $this->_('Thank you for your order'),
+		'mail.order.title'     => $this->_('thank you for your order!'),
 		'mail.order.body'      => $this->_('We have received your order. Please find the order details in the receipt sent by Stripe in parallel.'),
 		'mail.order.tagline'   => $this->_('Order confirmation'),
 
