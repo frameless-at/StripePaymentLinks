@@ -21,32 +21,25 @@ class PLMailService extends Wire {
 		$repl      = ['{title}' => (string)($links[0]['title'] ?? $mod->t('mail.common.product_fallback')), '{list}' => $listText];
 
 		// Subject + lead vary depending on whether the order has gated products.
+		// Both branches now share the same opener: greeting (via empty headline
+		// → fallback "Hello {firstname},") + sub-headline ("thank you for your
+		// order!") + lead. Access-mail additionally appends the access body.
+		$subHeadline = $mod->t('mail.order.title');
+		$headline    = '';
 		if ($hasAccess) {
 			$subjectKey   = $isMulti ? 'mail.multi.subject'   : 'mail.single.subject';
 			$preheaderKey = $isMulti ? 'mail.multi.preheader' : 'mail.single.preheader';
-			$headlineKey  = $isMulti ? 'mail.multi.title'     : 'mail.single.title';
 			$bodyKey      = $isMulti ? 'mail.multi.body'      : 'mail.single.body';
 			$ctaKey       = $isMulti ? 'mail.multi.cta'       : 'mail.single.cta';
 			$preheader = strtr($mod->t($preheaderKey), $repl);
-			$headline  = $mod->t($headlineKey);
-			// Prepend the order-confirmation heading + body so the access mail
-			// reads like the order-confirmation mail and adds the access block.
-			$leadText  = $mod->t('mail.order.title') . "\n\n"
-			           . $mod->t('mail.order.body')  . "\n\n"
-			           . strtr($mod->t($bodyKey), $repl);
+			$leadText  = $mod->t('mail.order.body') . "\n\n" . strtr($mod->t($bodyKey), $repl);
 			$ctaText   = strtr($mod->t($ctaKey), $repl);
 			$productUrl= (string)($links[0]['url'] ?? '#');
 			$subject   = ($mod->subjectPrefix ?? '') . strtr($mod->t($subjectKey), $repl);
 			$tagline   = $mod->t('mail.common.header_tagline');
 		} else {
-			// Order without gated access (service_redeemable / unmapped) — generic
-			// confirmation; CTA suppressed (no per-product URL to point at).
-			// Same shape as the access-mail lead so both mail types open the
-			// same way: greeting (via empty headline → fallback) + order title
-			// + order body.
 			$preheader = $mod->t('mail.order.preheader');
-			$headline  = '';
-			$leadText  = $mod->t('mail.order.title') . "\n\n" . $mod->t('mail.order.body');
+			$leadText  = $mod->t('mail.order.body');
 			$ctaText   = '';
 			$productUrl= '';
 			$subject   = ($mod->subjectPrefix ?? '') . $mod->t('mail.order.subject');
@@ -59,6 +52,7 @@ class PLMailService extends Wire {
 			'productTitle'  => $repl['{title}'],
 			'productUrl'    => $productUrl,
 			'ctaText'       => $ctaText,
+			'subHeadline'   => $subHeadline,
 			'leadText'      => $leadText,
 			'logoUrl'       => (string)($mod->logoUrl ?? ''),
 			'brandColor'    => (string)($mod->brandColor ?? '#7d0a3d'),
@@ -67,9 +61,9 @@ class PLMailService extends Wire {
 			'headerTagline' => $tagline,
 			'headline'      => $headline,
 			'footerNote'    => $mod->t('mail.common.footer_note'),
-			'infoLabel'     => $hasAccess ? $mod->t('mail.common.info_label') : '',
+			'infoLabel'     => '',
 			'extraHeading'  => $mod->t('mail.common.extra_heading'),
-			'closingText'   => $hasAccess ? $mod->t('mail.common.closing_text') : '',
+			'closingText'   => '',
 			'signatureName' => (string)($mod->mailSignatureName ?? $mod->mailFromName ?? ''),
 			'directLabel'   => $mod->t('mail.common.direct_link'),
 			'extraCtas'     => $isMulti ? array_map(
@@ -227,17 +221,15 @@ class PLMailService extends Wire {
 		}
 
 		$out = '';
+		$hr  = '<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0 18px 0;">';
+
 		$wdText = trim((string) ($mod->mailWithdrawalText ?? ''));
 		if ($wdText !== '' && !empty($groups['service_redeemable'])) {
-			$out .= '<div style="margin:24px 0 0 0;">'
-				  . $this->expandPlaceholders($mod, $wdText, $groups['service_redeemable'], $orderMeta)
-				  . '</div>';
+			$out .= $hr . $this->expandPlaceholders($mod, $wdText, $groups['service_redeemable'], $orderMeta);
 		}
 		$wvText = trim((string) ($mod->mailWaiverText ?? ''));
 		if ($wvText !== '' && !empty($groups['digital_immediate'])) {
-			$out .= '<div style="margin:24px 0 0 0;">'
-				  . $this->expandPlaceholders($mod, $wvText, $groups['digital_immediate'], $orderMeta)
-				  . '</div>';
+			$out .= $hr . $this->expandPlaceholders($mod, $wvText, $groups['digital_immediate'], $orderMeta);
 		}
 		return $out;
 	}

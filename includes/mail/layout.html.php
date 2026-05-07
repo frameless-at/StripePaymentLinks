@@ -40,8 +40,12 @@ $headlineOut = $has('headline')
   ? $esc($val('headline'))
   : ($esc($val('greeting', 'Hello')) . ($has('firstname') ? ' ' . $esc($val('firstname')) : '') . ',');
 
-// Decide if the info section should be shown (no explicit flag needed)
-$showInfo = $has('productUrl') || $has('infoLabel') || $has('closingText') || $has('signatureName');
+// Decide if the info section should be shown — only when multiple
+// products are present (extraCtas), or when the closing / signature
+// is set. For single-product mails the CTA button is the entry point;
+// the "Online product: …" and "Direct link: …" lines would just repeat
+// what the button already says.
+$showInfo = $has('extraCtas') || $has('closingText') || $has('signatureName');
 ?>
 <!doctype html>
 <html lang="en">
@@ -99,14 +103,19 @@ $showInfo = $has('productUrl') || $has('infoLabel') || $has('closingText') || $h
 			</td>
 		  </tr>
 
-		  <!-- Headline + Lead -->
+		  <!-- Headline + (optional) sub-headline + Lead -->
 		  <tr>
 			<td class="px" style="padding:26px 22px 10px 22px;">
 			  <div class="h1" style="font-size:22px;font-weight:700;margin:0 0 4px 0;color:#111;">
 				<?= $headlineOut ?>
 			  </div>
+			  <?php if ($has('subHeadline')): ?>
+			  <div style="font-size:18px;font-weight:700;margin:14px 0 4px 0;color:#111;">
+				<?= $esc($val('subHeadline')) ?>
+			  </div>
+			  <?php endif; ?>
 			  <?php if ($has('leadText')): ?>
-			  <div class="lead" style="font-size:17px;margin:10px 0 18px 0;color:#111;">
+			  <div class="lead" style="font-size:17px;margin:6px 0 18px 0;color:#111;">
 				<?= nl2br($esc($val('leadText'))) ?>
 			  </div>
 			  <?php endif; ?>
@@ -145,7 +154,7 @@ $showInfo = $has('productUrl') || $has('infoLabel') || $has('closingText') || $h
 				</p>
 			  <?php endif; ?>
 
-			  <?php if ($has('productUrl')): ?>
+			  <?php if ($has('productUrl') && $has('extraCtas')): ?>
 			  <div style="margin:0;">
 				<?= $esc($directLabel) ?>:
 				<a href="<?= $esc($val('productUrl')) ?>"
