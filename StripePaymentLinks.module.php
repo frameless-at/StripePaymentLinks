@@ -180,6 +180,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		'mail.order.preheader' => $this->_('We have received your order.'),
 		'mail.order.title'     => $this->_('Thank you for your order'),
 		'mail.order.body'      => $this->_('We have received your order. Please find the order details in the receipt sent by Stripe in parallel.'),
+		'mail.order.tagline'   => $this->_('Order confirmation'),
 
 		// ===== MAIL: FAGG-mandated order-confirmation blocks =====
 		'mail.fagg.durable_medium_notice'    => $this->_('This email is your order confirmation pursuant to § 7 Abs 3 FAGG on a durable medium.'),
@@ -188,8 +189,10 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		// Service / redeemable product (full withdrawal right)
 		'mail.fagg.withdrawal_section_title' => $this->_('Right of withdrawal'),
 		'mail.fagg.withdrawal_instructions'  => $this->_("You have the right to withdraw from this contract within 14 days without giving any reason. The withdrawal period expires 14 days from the day of contract conclusion.\n\nTo exercise your right of withdrawal, please send us a clear declaration (e.g. by email to {contact_email}). You may use the model withdrawal form below, but it is not mandatory."),
-		'mail.fagg.withdrawal_form_title'    => $this->_('Model withdrawal form'),
-		'mail.fagg.withdrawal_form_body'     => $this->_("To: {provider}, {contact_email}\n\nI/We hereby give notice that I/we withdraw from my/our contract for the provision of the following service:\n\n— Ordered on: ____________\n— Name of consumer: ____________\n— Address of consumer: ____________\n— Signature of consumer (only if this form is notified on paper): ____________\n— Date: ____________"),
+		'mail.fagg.withdrawal_form_link_label' => $this->_('Open prepared withdrawal email'),
+		'mail.fagg.withdrawal_form_link_help'  => $this->_('Opens your mail program with a pre-filled message you only need to send.'),
+		'mail.fagg.withdrawal_mailto_subject'  => $this->_('Withdrawal — order {order_id}'),
+		'mail.fagg.withdrawal_mailto_body'     => $this->_("To {provider},\n\nI hereby withdraw from the contract for the following order:\n\n  Ordered on:    {order_date}\n  Order number:  {order_id}\n  Product(s):    {products}\n  Name:          {name}\n  Email:         {email}\n\nDate: {today}"),
 		'mail.fagg.online_withdrawal_intro'  => $this->_('You can also declare your withdrawal electronically:'),
 		'mail.fagg.online_withdrawal_label'  => $this->_('Withdraw contract online'),
 		'mail.fagg.contact_for_withdrawal_label' => $this->_('Contact for withdrawal'),
@@ -1008,7 +1011,15 @@ public function processCheckout(Page $currentPage): void {
 		 }
 	 
 		 if ($this->shouldSendAccessMail($isNew) && (!empty($links) || !empty($allMapped) || !empty($unmapped))) {
-		   $this->mail()->sendAccessSummaryMail($this, $buyer, $links, array_values($allMapped), $unmapped);
+		   $orderMeta = [
+			 'session_id' => (string)($checkoutSession->id ?? ''),
+			 'order_date' => isset($checkoutSession->created) && is_numeric($checkoutSession->created)
+			   ? date('Y-m-d', (int)$checkoutSession->created)
+			   : date('Y-m-d'),
+			 'name'       => (string)$fullName,
+			 'email'      => (string)$email,
+		   ];
+		   $this->mail()->sendAccessSummaryMail($this, $buyer, $links, array_values($allMapped), $unmapped, $orderMeta);
 		 }
 		 if ($alreadyDisallowed) $this->modal()->queueAlreadyPurchasedModal();
 	 
