@@ -134,6 +134,41 @@ final class PLWithdrawalService extends Wire
 	}
 
 	/**
+	 * Auto-open the withdrawal form modal when the page is loaded with
+	 * ?withdraw=1 in the query string. Used by mail-side links so the
+	 * recipient lands on any frontend page and the modal opens.
+	 *
+	 * @return string <script> tag (or empty).
+	 */
+	public function autoOpenScript(): string
+	{
+		return <<<HTML
+<script>
+(function(){
+  try {
+	var p = new URLSearchParams(window.location.search);
+	if (!p.has('withdraw')) return;
+	var run = function(){
+	  if (!window.bootstrap) { return setTimeout(run, 50); }
+	  var el = document.getElementById('withdrawalFormModal');
+	  if (!el) return;
+	  bootstrap.Modal.getOrCreateInstance(el).show();
+	  var url = new URL(window.location.href);
+	  url.searchParams.delete('withdraw');
+	  window.history.replaceState({}, '', url.pathname + (url.searchParams.toString() ? '?' + url.searchParams.toString() : '') + url.hash);
+	};
+	if (document.readyState === 'loading') {
+	  document.addEventListener('DOMContentLoaded', run);
+	} else {
+	  run();
+	}
+  } catch(e) { /* noop */ }
+})();
+</script>
+HTML;
+	}
+
+	/**
 	 * Render a Bootstrap modal shell (header + body) consistent with
 	 * the existing PLModalService output.
 	 */

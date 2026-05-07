@@ -751,6 +751,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		$out .= $this->withdrawal()->modalForm();
 		$out .= $this->withdrawal()->modalConfirm();
 		$out .= $this->withdrawal()->modalSuccess();
+		$out .= $this->withdrawal()->autoOpenScript();
 
 		// 8) One-off notices + global AJAX handler
 		$out .= $this->modal()->renderModalNotice();

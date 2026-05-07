@@ -256,14 +256,15 @@ class PLMailService extends Wire {
 		$out .= '<p style="margin:0 0 10px 0;">' . $this->renderProductsLine($mod, $pages) . '</p>';
 		$out .= '<div style="white-space:pre-line;margin:0 0 12px 0;">' . $h($instructions) . '</div>';
 
-		// Online-withdrawal link (only for service_redeemable)
+		// Online-withdrawal link (only for service_redeemable). The link
+		// points at the site's root with ?withdraw=1; the module's render()
+		// injects autoOpenScript() which detects the param and opens the
+		// withdrawal modal on whatever frontend page the recipient lands on.
 		$out .= '<p style="margin:0 0 6px 0;">' . $h($mod->t('mail.fagg.online_withdrawal_intro')) . '</p>';
-		$wdPage = $mod->wire('pages')->get('/withdrawal/');
-		$wdUrl  = ($wdPage && $wdPage->id) ? $wdPage->httpUrl : '';
-		if ($wdUrl !== '') {
-			$out .= '<p style="margin:0 0 12px 0;"><a href="' . $h($wdUrl) . '" style="color:' . $h($brand) . ';">'
-				  . $h($mod->t('mail.fagg.online_withdrawal_label')) . '</a></p>';
-		}
+		$root  = rtrim((string) $config->urls->httpRoot, '/');
+		$wdUrl = $root . '/?withdraw=1';
+		$out .= '<p style="margin:0 0 12px 0;"><a href="' . $h($wdUrl) . '" style="color:' . $h($brand) . ';">'
+			  . $h($mod->t('mail.fagg.online_withdrawal_label')) . '</a></p>';
 
 		// Contact for withdrawal
 		if ($contactEmail !== '') {
