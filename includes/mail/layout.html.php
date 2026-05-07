@@ -217,15 +217,6 @@ $showInfo = $has('productUrl') || $has('infoLabel') || $has('closingText') || $h
 		  </tr>
 		  <?php endif; ?>
 
-		  <!-- Footer info: provider + contact + AGB link (raw HTML) -->
-		  <?php if ($has('footerInfo')): ?>
-		  <tr>
-			<td style="padding:14px 22px;border-top:1px solid #eee;color:#374151;font-size:13px;line-height:1.6;">
-			  <?= $val('footerInfo') /* trusted module-generated HTML */ ?>
-			</td>
-		  </tr>
-		  <?php endif; ?>
-
 		  <!-- Footer note -->
 		  <?php if ($has('footerNote')): ?>
 		  <tr>

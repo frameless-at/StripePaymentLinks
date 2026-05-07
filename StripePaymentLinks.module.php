@@ -182,27 +182,13 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		'mail.order.body'      => $this->_('We have received your order. Please find the order details in the receipt sent by Stripe in parallel.'),
 		'mail.order.tagline'   => $this->_('Order confirmation'),
 
-		// ===== MAIL: FAGG-mandated order-confirmation blocks =====
-		'mail.fagg.durable_medium_notice'    => $this->_('This email is your order confirmation pursuant to § 7 Abs 3 FAGG on a durable medium.'),
-		'mail.fagg.terms_link_label'         => $this->_('Terms and Conditions'),
-
-		// Service / redeemable product (full withdrawal right)
-		'mail.fagg.withdrawal_section_title' => $this->_('Right of withdrawal'),
-		'mail.fagg.withdrawal_instructions'  => $this->_("You have the right to withdraw from this contract within 14 days without giving any reason. The withdrawal period expires 14 days from the day of contract conclusion.\n\nTo exercise your right of withdrawal, please send us a clear declaration (e.g. by email to {contact_email})."),
-		'mail.fagg.withdrawal_form_link_label' => $this->_('Open prepared withdrawal email'),
-		'mail.fagg.withdrawal_form_link_help'  => $this->_('Opens your mail program with a pre-filled message you only need to send.'),
+		// ===== MAIL: pre-filled mailto for the withdrawal model form =====
+		// Used by the {withdrawal_mailto} placeholder inside mailWithdrawalText.
+		// All other consumer-rights text is now site-pflegbar via the two
+		// TinyMCE config fields (mailWithdrawalText / mailWaiverText) — no
+		// hardcoded jurisdiction-specific defaults shipped with the module.
 		'mail.fagg.withdrawal_mailto_subject'  => $this->_('Withdrawal — order {order_id}'),
 		'mail.fagg.withdrawal_mailto_body'     => $this->_("To {provider},\n\nI hereby withdraw from the contract for the following order:\n\n  Ordered on:    {order_date}\n  Order number:  {order_id}\n  Product(s):    {products}\n  Name:          {name}\n  Email:         {email}\n\nDate: {today}"),
-		'mail.fagg.online_withdrawal_intro'  => $this->_('You can also declare your withdrawal electronically:'),
-		'mail.fagg.online_withdrawal_label'  => $this->_('Withdraw contract online'),
-		'mail.fagg.contact_for_withdrawal_label' => $this->_('Contact for withdrawal'),
-
-		// Digital immediate (waiver)
-		'mail.fagg.digital_waiver_title'     => $this->_('Waiver of right of withdrawal'),
-		'mail.fagg.digital_waiver_body'      => $this->_('By accepting our terms during ordering you expressly requested the immediate provision of digital content and acknowledged that you thereby lose your right of withdrawal pursuant to § 18 Abs 1 Z 11 FAGG.'),
-
-		// Affected products list (used inside both blocks when products mix)
-		'mail.fagg.affected_products_label'  => $this->_('Affected product(s):'),
 
 		// ===== WITHDRAWAL: form modal (step 1) =====
 		'withdrawal.form.title'           => $this->_('Withdraw contract'),

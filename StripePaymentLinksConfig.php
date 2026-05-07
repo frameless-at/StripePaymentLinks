@@ -38,6 +38,8 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			'mailHeaderName'         => (string)($cfg->siteName ?? ''),
 			'mailSignatureName'      => (string)($cfg->siteName ?? ''),
 			'mailExtraNote'          => '',
+			'mailWithdrawalText'     => '',
+			'mailWaiverText'         => '',
 			
 			// Sync Helper
 			'pl_sync_dry_run' => true,
@@ -224,7 +226,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		$sig->attr('value', (string)$this->get('mailSignatureName'));
 		$fsMail->add($sig);
 
-		// Extra note (e.g. legal disclaimer like waiver of right of withdrawal)
+		// Extra note (free-form, shown in every mail above the footer)
 		$extra = null;
 		if ($this->modules->isInstalled('InputfieldTinyMCE')) {
 			$extra = $this->modules->get('InputfieldTinyMCE');
@@ -234,10 +236,44 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		}
 		$extra->name  = 'mailExtraNote';
 		$extra->label = 'Additional mail note (optional)';
-		$extra->notes = 'Shown in the access mail above the footer. Basic formatting (bold, lists, links) is allowed and rendered in the HTML mail; for the plain-text part it is auto-stripped.';
+		$extra->notes = 'Shown in every order-confirmation mail above the footer. Basic formatting (bold, lists, links) is allowed and rendered in the HTML mail; for the plain-text part it is auto-stripped.';
 		$extra->attr('rows', 6);
 		$extra->attr('value', (string)$this->get('mailExtraNote'));
 		$fsMail->add($extra);
+
+		$placeholders = 'Available placeholders: {products}, {provider}, {contact_email}, {order_id}, {order_date}, {name}, {email}, {today}, {withdrawal_mailto} (pre-filled mailto link), {withdrawal_online} (online withdrawal URL).';
+
+		// Withdrawal text — shown when the order contains products with right of withdrawal
+		$wd = null;
+		if ($this->modules->isInstalled('InputfieldTinyMCE')) {
+			$wd = $this->modules->get('InputfieldTinyMCE');
+		}
+		if (!$wd) {
+			$wd = $this->modules->get('InputfieldTextarea');
+		}
+		$wd->name  = 'mailWithdrawalText';
+		$wd->label = 'Withdrawal text — right of withdrawal applies';
+		$wd->description = 'Rendered in the order-confirmation mail when the order contains non-gated products (no requires_access). Use this for the legal withdrawal instructions and links.';
+		$wd->notes = $placeholders;
+		$wd->attr('rows', 8);
+		$wd->attr('value', (string)$this->get('mailWithdrawalText'));
+		$fsMail->add($wd);
+
+		// Waiver text — shown when the order contains products with immediate digital delivery
+		$wv = null;
+		if ($this->modules->isInstalled('InputfieldTinyMCE')) {
+			$wv = $this->modules->get('InputfieldTinyMCE');
+		}
+		if (!$wv) {
+			$wv = $this->modules->get('InputfieldTextarea');
+		}
+		$wv->name  = 'mailWaiverText';
+		$wv->label = 'Waiver text — right of withdrawal does not apply';
+		$wv->description = 'Rendered in the order-confirmation mail when the order contains gated digital products (requires_access=1). Use this for the waiver acknowledgment.';
+		$wv->notes = $placeholders;
+		$wv->attr('rows', 8);
+		$wv->attr('value', (string)$this->get('mailWaiverText'));
+		$fsMail->add($wv);
 
 		$inputfields->add($fsMail);
 		

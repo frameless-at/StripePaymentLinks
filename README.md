@@ -274,39 +274,53 @@ page; the link above triggers the flow.
 
 ---
 
-## FAGG-Compliant Order-Confirmation Mail (§ 7 Abs 3 FAGG)
+## Consumer-rights block in the order-confirmation mail
 
-Since v1.2.0 the order-confirmation mail (sent automatically after a
-successful Stripe checkout) carries the FAGG-mandated information for
-each purchased product, classified per product based on the existing
-`requires_access` flag:
+After a successful Stripe checkout the module sends an order-confirmation
+mail. Two TinyMCE config fields drive what consumer-rights wording the
+mail contains, classified per product via the existing `requires_access`
+flag:
 
 | `requires_access` | Mail block |
 |---|---|
-| `1` (gated digital content) | Waiver acknowledgment (§ 18 Abs 1 Z 11 FAGG) |
-| `0` or unset (services, vouchers, consultations) | Full withdrawal instructions + model withdrawal form + online-withdrawal link |
+| `0` / unset / unmappable Stripe product | **Withdrawal text** — for products with right of withdrawal |
+| `1` (gated digital content) | **Waiver text** — for products where the consumer waived their right |
 
-Universal blocks (in every confirmation mail):
+Mixed orders show both blocks, each prefixed with `{products}` if you
+include that placeholder.
 
-- "Durable medium" notice (§ 7 Abs 3 FAGG)
-- Link to your **Terms and Conditions** page (`termsPage` config)
-- Link to your **Privacy policy** page (`privacyPage` config)
+The module ships **no hardcoded legal wording** — it deliberately stays
+jurisdiction-neutral. You write the texts that match your jurisdiction
+(Austria FAGG, Germany BGB, France Code de la consommation, …) once in
+the module config and they appear in every confirmation mail.
+
+### Available placeholders inside both texts
+
+`{products}`, `{provider}`, `{contact_email}`, `{order_id}`,
+`{order_date}`, `{name}`, `{email}`, `{today}`, `{withdrawal_mailto}`
+(href for a pre-filled mailto: link), `{withdrawal_online}` (URL to
+trigger the online withdrawal modal).
 
 ### Setup
 
-1. In module config → **Withdrawal (FAGG / EU 2023/2673)**:
+1. In **Withdrawal (FAGG / EU 2023/2673)**:
    - **Privacy policy page** (page selector)
    - **Terms and Conditions page** (page selector)
-   - **Contact email for withdrawal** (used in instructions + model form;
-     falls back to the sender email when empty)
-2. The German FAGG wording for instructions, model form, and waiver
-   acknowledgment is editable via the ProcessWire Translator. Translation
-   keys are under `mail.fagg.*`.
+   - **Contact email for withdrawal** (used inside the `{contact_email}`
+     and `{withdrawal_mailto}` placeholders; falls back to the sender
+     email when empty)
+2. In **Mail defaults & branding**:
+   - **Withdrawal text** — TinyMCE; see placeholders above
+   - **Waiver text** — TinyMCE; see placeholders above
+3. The pre-filled mailto: link (subject + body) is editable via the
+   ProcessWire Translator under `mail.fagg.withdrawal_mailto_subject`
+   and `mail.fagg.withdrawal_mailto_body`.
 
 ### Custom mail layout?
 
 If you use an own mail layout (config option **Mail layout**), add a
-slot for the FAGG block. The module passes raw HTML in `$faggBlock`:
+slot for the consumer-rights block. The module passes raw HTML in
+`$faggBlock`:
 
 ```php
 <?php if ($has('faggBlock')): ?>
@@ -318,11 +332,10 @@ slot for the FAGG block. The module passes raw HTML in `$faggBlock`:
 <?php endif; ?>
 ```
 
-Without this slot, your custom layout will not render the FAGG block.
-
 > ⚠️ **Compliance note**: Setting **Access mail after purchase** to
-> `never` disables the entire confirmation mail — including the FAGG
-> block. This is a config-level decision; the module does not override it.
+> `never` disables the entire confirmation mail — including the
+> consumer-rights block. This is a config-level decision; the module
+> does not override it.
 
 ---
 
