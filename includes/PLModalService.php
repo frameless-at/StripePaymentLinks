@@ -459,11 +459,6 @@ document.addEventListener('submit', async (ev) => {
 		} else {
 		  nextModal.show();
 		}
-		// Reset confirmation forms when leaving
-		if (modalEl) {
-		  const f = modalEl.querySelector('form');
-		  if (f && (op === 'withdrawal_submit' || op === 'withdrawal_init')) f.reset();
-		}
 		return;
 	  }
 	}
