@@ -604,7 +604,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			$wd->name  = 'mailWithdrawalText';
 			$wd->label = 'Withdrawal text — right of withdrawal applies';
 			$wd->description = 'Rendered in the order-confirmation mail when the order contains non-gated products (no requires_access). Use this for the legal withdrawal instructions and links.';
-			$wd->notes = '{products}, {provider}, {contact_email}, {order_id}, {order_date}, {name}, {email}, {today}, {withdrawal_mail}…{withdrawal_mail_end}, {withdrawal_mailto}…{withdrawal_mailto_end}, {withdrawal_online}…{withdrawal_online_end}';
+			$wd->notes = '{products}, {provider}, {contact_email}, {order_id}, {order_date}, {name}, {email}, {today}, {withdrawal_mailto}…{withdrawal_mailto_end}, {withdrawal_online}…{withdrawal_online_end}';
 			$wd->attr('rows', 8);
 			$wd->attr('value', (string)$this->get('mailWithdrawalText'));
 			$fsW->add($wd);

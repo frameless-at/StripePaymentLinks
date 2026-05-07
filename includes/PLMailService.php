@@ -245,12 +245,14 @@ class PLMailService extends Wire {
 	 *
 	 * Anchor-pair placeholders (rendered as <a href="…">linktext</a> — TinyMCE
 	 * strips/normalizes raw {…} inside href attributes, so a wrapping pair is
-	 * the only way to let editors keep linktext separate from the URL):
-	 *   {withdrawal_mail}LINKTEXT{withdrawal_mail_end}    — simple mailto: to
-	 *                                                       the contact email
+	 * the only way to let editors keep linktext separate from the URL). Used
+	 * only for URLs the editor cannot type literally:
 	 *   {withdrawal_mailto}LINKTEXT{withdrawal_mailto_end}— pre-filled mailto:
 	 *                                                       (subject + body)
 	 *   {withdrawal_online}LINKTEXT{withdrawal_online_end}— site root + ?withdraw=1
+	 *
+	 * For a plain mailto: to the contact address, editors use TinyMCE's link
+	 * tool directly — no placeholder needed.
 	 */
 	private function expandPlaceholders(StripePaymentLinks $mod, string $html, array $items, array $orderMeta): string
 	{
@@ -274,7 +276,6 @@ class PLMailService extends Wire {
 		// Anchor-pair placeholders first — replaced with <a> tags. The
 		// TinyMCE editor saves the inner LINKTEXT as is; we just wrap.
 		$urls = [
-			'withdrawal_mail'   => $contactEmail !== '' ? 'mailto:' . rawurlencode($contactEmail) : '',
 			'withdrawal_mailto' => $this->buildWithdrawalMailto($mod, $items, $contactEmail, $orderMeta),
 			'withdrawal_online' => $root . '/?withdraw=1',
 		];
