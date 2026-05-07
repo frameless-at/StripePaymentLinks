@@ -11,31 +11,56 @@ class PLMailService extends Wire {
 	/* =====================================================================
 	 * ACCESS SUMMARY (1..n Produkte)
 	 * ===================================================================*/
-	public function sendAccessSummaryMail(StripePaymentLinks $mod, User $user, array $links, array $allMappedItems = []): bool
+	public function sendAccessSummaryMail(StripePaymentLinks $mod, User $user, array $links, array $allMappedItems = [], array $unmappedLabels = []): bool
 	{
 		$mail   = wire('mail');
 		$config = wire('config');
-		$isMulti  = count($links) > 1;
-		$listText = implode(', ', array_filter(array_map(fn($l) => (string)($l['title'] ?? ''), $links)));
-		$repl     = ['{title}' => (string)($links[0]['title'] ?? $mod->t('mail.common.product_fallback')), '{list}' => $listText];
-	
+		$hasAccess = !empty($links);
+		$isMulti   = count($links) > 1;
+		$listText  = implode(', ', array_filter(array_map(fn($l) => (string)($l['title'] ?? ''), $links)));
+		$repl      = ['{title}' => (string)($links[0]['title'] ?? $mod->t('mail.common.product_fallback')), '{list}' => $listText];
+
+		// Subject + lead vary depending on whether the order has gated products.
+		if ($hasAccess) {
+			$subjectKey   = $isMulti ? 'mail.multi.subject'   : 'mail.single.subject';
+			$preheaderKey = $isMulti ? 'mail.multi.preheader' : 'mail.single.preheader';
+			$headlineKey  = $isMulti ? 'mail.multi.title'     : 'mail.single.title';
+			$bodyKey      = $isMulti ? 'mail.multi.body'      : 'mail.single.body';
+			$ctaKey       = $isMulti ? 'mail.multi.cta'       : 'mail.single.cta';
+			$preheader = strtr($mod->t($preheaderKey), $repl);
+			$headline  = $mod->t($headlineKey);
+			$leadText  = strtr($mod->t($bodyKey), $repl);
+			$ctaText   = strtr($mod->t($ctaKey), $repl);
+			$productUrl= (string)($links[0]['url'] ?? '#');
+			$subject   = ($mod->subjectPrefix ?? '') . strtr($mod->t($subjectKey), $repl);
+		} else {
+			// Order without gated access (service_redeemable / unmapped) — generic
+			// confirmation; CTA suppressed (no per-product URL to point at).
+			$preheader = $mod->t('mail.order.preheader');
+			$headline  = $mod->t('mail.order.title');
+			$leadText  = $mod->t('mail.order.body');
+			$ctaText   = '';
+			$productUrl= '';
+			$subject   = ($mod->subjectPrefix ?? '') . $mod->t('mail.order.subject');
+		}
+
 		$vars = [
-			'preheader'     => strtr($mod->t($isMulti ? 'mail.multi.preheader' : 'mail.single.preheader'), $repl),
+			'preheader'     => $preheader,
 			'firstname'     => $this->displayName($user),
 			'productTitle'  => $repl['{title}'],
-			'productUrl'    => (string)($links[0]['url'] ?? '#'),
-			'ctaText'       => strtr($mod->t($isMulti ? 'mail.multi.cta' : 'mail.single.cta'), $repl),
-			'leadText'      => strtr($mod->t($isMulti ? 'mail.multi.body' : 'mail.single.body'), $repl),
+			'productUrl'    => $productUrl,
+			'ctaText'       => $ctaText,
+			'leadText'      => $leadText,
 			'logoUrl'       => (string)($mod->logoUrl ?? ''),
 			'brandColor'    => (string)($mod->brandColor ?? '#7d0a3d'),
 			'fromName'      => (string)($mod->mailFromName ?? ($config->siteName ?? $config->httpHost ?? 'Website')),
 			'brandHeader'   => (string)($mod->mailHeaderName ?? ''),
 			'headerTagline' => $mod->t('mail.common.header_tagline'),
-			'headline'      => $mod->t($isMulti ? 'mail.multi.title' : 'mail.single.title'),
+			'headline'      => $headline,
 			'footerNote'    => $mod->t('mail.common.footer_note'),
-			'infoLabel'     => $mod->t('mail.common.info_label'),
+			'infoLabel'     => $hasAccess ? $mod->t('mail.common.info_label') : '',
 			'extraHeading'  => $mod->t('mail.common.extra_heading'),
-			'closingText'   => $mod->t('mail.common.closing_text'),
+			'closingText'   => $hasAccess ? $mod->t('mail.common.closing_text') : '',
 			'signatureName' => (string)($mod->mailSignatureName ?? $mod->mailFromName ?? ''),
 			'directLabel'   => $mod->t('mail.common.direct_link'),
 			'extraCtas'     => $isMulti ? array_map(
@@ -43,9 +68,15 @@ class PLMailService extends Wire {
 				array_slice($links, 1)
 			) : [],
 			'extraNote'     => trim((string)($mod->mailExtraNote ?? '')),
-			'faggBlock'     => $this->buildFaggBlock($mod, $allMappedItems ?: $this->itemsFromLinks($mod, $links)),
+			'faggBlock'     => $this->buildFaggBlock(
+				$mod,
+				array_merge(
+					$allMappedItems ?: $this->itemsFromLinks($mod, $links),
+					array_values($unmappedLabels)
+				)
+			),
 		];
-		$p = $links ? $mod->wire('pages')->get((int)$links[0]['id']) : null;
+		$p = $hasAccess ? $mod->wire('pages')->get((int)$links[0]['id']) : null;
 		if ($p && $p->id && $p->hasField('access_mail_addon_txt')) {
 			$vars['leadText'] = trim((string)$p->access_mail_addon_txt) . "\n\n" . ($vars['leadText'] ?? '');
 		}
@@ -60,7 +91,7 @@ class PLMailService extends Wire {
 			(string)($mod->mailFromEmail ?? ($config->adminEmail ?? 'no-reply@' . ($config->httpHost ?? 'localhost'))),
 			$vars['fromName']
 		);
-		$m->subject(($mod->subjectPrefix ?? '') . strtr($mod->t($isMulti ? 'mail.multi.subject' : 'mail.single.subject'), $repl));
+		$m->subject($subject);
 		$m->bodyHTML($html);
 		$plain = "{$vars['leadText']}\n\n{$vars['productUrl']}\n\n{$vars['closingText']}\n{$vars['signatureName']}\n";
 		if ($vars['extraNote'] !== '') {
@@ -161,13 +192,22 @@ class PLMailService extends Wire {
 		$h = fn($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
 		$brand = (string) ($mod->brandColor ?? '#7d0a3d');
 
-		// Group items by classification
+		// Group items by classification.
+		// Item can be:
+		//   - \ProcessWire\Page  → classify via classifyWithdrawalType()
+		//   - string             → unmapped Stripe label, treated as service_redeemable
 		$groups = ['service_redeemable' => [], 'digital_immediate' => []];
 		foreach ($items as $p) {
-			if (!$p instanceof \ProcessWire\Page || !$p->id) continue;
-			$type = $mod->classifyWithdrawalType($p);
-			if (!isset($groups[$type])) $groups[$type] = [];
-			$groups[$type][] = $p;
+			if ($p instanceof \ProcessWire\Page && $p->id) {
+				$type = $mod->classifyWithdrawalType($p);
+				if (!isset($groups[$type])) $groups[$type] = [];
+				$groups[$type][] = $p;
+			} elseif (is_string($p) && trim($p) !== '') {
+				$groups['service_redeemable'][] = $p;
+			}
+		}
+		if (empty($groups['service_redeemable']) && empty($groups['digital_immediate'])) {
+			return '';
 		}
 
 		$out = '<div style="margin:24px 0 0 0;padding:18px 22px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px;font-size:14px;color:#374151;line-height:1.55;">';
@@ -250,12 +290,16 @@ class PLMailService extends Wire {
 		return $out;
 	}
 
-	private function renderProductsLine(StripePaymentLinks $mod, array $pages): string
+	private function renderProductsLine(StripePaymentLinks $mod, array $items): string
 	{
 		$h = fn($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
 		$titles = [];
-		foreach ($pages as $p) {
-			if ($p instanceof \ProcessWire\Page && $p->id) $titles[] = (string) $p->title;
+		foreach ($items as $p) {
+			if ($p instanceof \ProcessWire\Page && $p->id) {
+				$titles[] = (string) $p->title;
+			} elseif (is_string($p) && trim($p) !== '') {
+				$titles[] = trim($p);
+			}
 		}
 		if (!$titles) return '';
 		return '<em>' . $h($mod->t('mail.fagg.affected_products_label')) . '</em> ' . $h(implode(', ', $titles));

@@ -175,6 +175,12 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		'ui.ajax.error_generic'     => $this->_('Error'),
 		'ui.ajax.error_server'      => $this->_('Server error.'),
 
+		// ===== MAIL: order confirmation without gated access =====
+		'mail.order.subject'   => $this->_('Order confirmation'),
+		'mail.order.preheader' => $this->_('We have received your order.'),
+		'mail.order.title'     => $this->_('Thank you for your order'),
+		'mail.order.body'      => $this->_('We have received your order. Please find the order details in the receipt sent by Stripe in parallel.'),
+
 		// ===== MAIL: FAGG-mandated order-confirmation blocks =====
 		'mail.fagg.durable_medium_notice'    => $this->_('This email is your order confirmation pursuant to § 7 Abs 3 FAGG on a durable medium.'),
 		'mail.fagg.terms_link_label'         => $this->_('Terms and Conditions'),
@@ -1000,8 +1006,8 @@ public function processCheckout(Page $currentPage): void {
 		   $session->set('pl_access_links', $links);
 		 }
 	 
-		 if ($this->shouldSendAccessMail($isNew) && (!empty($links) || !empty($allMapped))) {
-		   $this->mail()->sendAccessSummaryMail($this, $buyer, $links, array_values($allMapped));
+		 if ($this->shouldSendAccessMail($isNew) && (!empty($links) || !empty($allMapped) || !empty($unmapped))) {
+		   $this->mail()->sendAccessSummaryMail($this, $buyer, $links, array_values($allMapped), $unmapped);
 		 }
 		 if ($alreadyDisallowed) $this->modal()->queueAlreadyPurchasedModal();
 	 
