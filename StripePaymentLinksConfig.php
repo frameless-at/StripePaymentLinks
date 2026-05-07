@@ -234,7 +234,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		}
 		$extra->name  = 'mailExtraNote';
 		$extra->label = 'Additional mail note (optional)';
-		$extra->notes = 'Shown in the access mail above the footer. Basic formatting (bold, lists, links) is allowed and rendered in the HTML mail; for the plain-text part it is auto-stripped. Useful for legal notices like "Verzicht auf das Rücktrittsrecht".';
+		$extra->notes = 'Shown in the access mail above the footer. Basic formatting (bold, lists, links) is allowed and rendered in the HTML mail; for the plain-text part it is auto-stripped.';
 		$extra->attr('rows', 6);
 		$extra->attr('value', (string)$this->get('mailExtraNote'));
 		$fsMail->add($extra);
