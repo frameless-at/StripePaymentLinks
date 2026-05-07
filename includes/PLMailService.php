@@ -41,9 +41,12 @@ class PLMailService extends Wire {
 		} else {
 			// Order without gated access (service_redeemable / unmapped) — generic
 			// confirmation; CTA suppressed (no per-product URL to point at).
+			// Same shape as the access-mail lead so both mail types open the
+			// same way: greeting (via empty headline → fallback) + order title
+			// + order body.
 			$preheader = $mod->t('mail.order.preheader');
-			$headline  = $mod->t('mail.order.title');
-			$leadText  = $mod->t('mail.order.body');
+			$headline  = '';
+			$leadText  = $mod->t('mail.order.title') . "\n\n" . $mod->t('mail.order.body');
 			$ctaText   = '';
 			$productUrl= '';
 			$subject   = ($mod->subjectPrefix ?? '') . $mod->t('mail.order.subject');
