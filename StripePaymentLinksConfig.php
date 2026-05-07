@@ -241,42 +241,8 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		$extra->attr('value', (string)$this->get('mailExtraNote'));
 		$fsMail->add($extra);
 
-		$placeholders = 'Available placeholders: {products}, {provider}, {contact_email}, {order_id}, {order_date}, {name}, {email}, {today}, {withdrawal_mailto} (pre-filled mailto link), {withdrawal_online} (online withdrawal URL).';
-
-		// Withdrawal text — shown when the order contains products with right of withdrawal
-		$wd = null;
-		if ($this->modules->isInstalled('InputfieldTinyMCE')) {
-			$wd = $this->modules->get('InputfieldTinyMCE');
-		}
-		if (!$wd) {
-			$wd = $this->modules->get('InputfieldTextarea');
-		}
-		$wd->name  = 'mailWithdrawalText';
-		$wd->label = 'Withdrawal text — right of withdrawal applies';
-		$wd->description = 'Rendered in the order-confirmation mail when the order contains non-gated products (no requires_access). Use this for the legal withdrawal instructions and links.';
-		$wd->notes = $placeholders;
-		$wd->attr('rows', 8);
-		$wd->attr('value', (string)$this->get('mailWithdrawalText'));
-		$fsMail->add($wd);
-
-		// Waiver text — shown when the order contains products with immediate digital delivery
-		$wv = null;
-		if ($this->modules->isInstalled('InputfieldTinyMCE')) {
-			$wv = $this->modules->get('InputfieldTinyMCE');
-		}
-		if (!$wv) {
-			$wv = $this->modules->get('InputfieldTextarea');
-		}
-		$wv->name  = 'mailWaiverText';
-		$wv->label = 'Waiver text — right of withdrawal does not apply';
-		$wv->description = 'Rendered in the order-confirmation mail when the order contains gated digital products (requires_access=1). Use this for the waiver acknowledgment.';
-		$wv->notes = $placeholders;
-		$wv->attr('rows', 8);
-		$wv->attr('value', (string)$this->get('mailWaiverText'));
-		$fsMail->add($wv);
-
 		$inputfields->add($fsMail);
-		
+
 		// Frontend Assets
 		$fsAssets = $this->modules->get('InputfieldFieldset');
 		$fsAssets->label = 'Frontend assets';
@@ -626,6 +592,38 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			$wdContact->columnWidth = 100;
 			$wdContact->attr('value', (string) $this->get('withdrawalContactEmail'));
 			$fsW->add($wdContact);
+
+			// Withdrawal text — rendered for products with right of withdrawal
+			$wd = null;
+			if ($this->modules->isInstalled('InputfieldTinyMCE')) {
+				$wd = $this->modules->get('InputfieldTinyMCE');
+			}
+			if (!$wd) {
+				$wd = $this->modules->get('InputfieldTextarea');
+			}
+			$wd->name  = 'mailWithdrawalText';
+			$wd->label = 'Withdrawal text — right of withdrawal applies';
+			$wd->description = 'Rendered in the order-confirmation mail when the order contains non-gated products (no requires_access). Use this for the legal withdrawal instructions and links.';
+			$wd->notes = 'Placeholders: {products}, {provider}, {contact_email}, {order_id}, {order_date}, {name}, {email}, {today}, {withdrawal_mailto} (pre-filled mailto: link for the consumer\'s withdrawal declaration), {withdrawal_online} (URL that opens the online withdrawal modal). Don\'t include universal wording like the durable-medium notice here — put it in "Additional mail note" so it renders only once per mail.';
+			$wd->attr('rows', 8);
+			$wd->attr('value', (string)$this->get('mailWithdrawalText'));
+			$fsW->add($wd);
+
+			// Waiver text — rendered for products where the right of withdrawal has been waived
+			$wv = null;
+			if ($this->modules->isInstalled('InputfieldTinyMCE')) {
+				$wv = $this->modules->get('InputfieldTinyMCE');
+			}
+			if (!$wv) {
+				$wv = $this->modules->get('InputfieldTextarea');
+			}
+			$wv->name  = 'mailWaiverText';
+			$wv->label = 'Waiver text — right of withdrawal does not apply';
+			$wv->description = 'Rendered in the order-confirmation mail when the order contains gated digital products (requires_access=1). Use this for the waiver acknowledgment.';
+			$wv->notes = 'Placeholders: {products}, {provider}, {order_id}, {order_date}, {name}, {email}, {today}. Withdrawal-specific placeholders ({withdrawal_mailto}, {withdrawal_online}, {contact_email}) are not applicable here — the right of withdrawal has been waived. Don\'t include universal wording like the durable-medium notice here — put it in "Additional mail note" so it renders only once per mail.';
+			$wv->attr('rows', 8);
+			$wv->attr('value', (string)$this->get('mailWaiverText'));
+			$fsW->add($wv);
 
 		$inputfields->add($fsW);
 
