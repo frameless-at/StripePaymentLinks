@@ -107,7 +107,7 @@ $showInfo = $has('productUrl') || $has('infoLabel') || $has('closingText') || $h
 			  </div>
 			  <?php if ($has('leadText')): ?>
 			  <div class="lead" style="font-size:17px;margin:10px 0 18px 0;color:#111;">
-				<?= $esc($val('leadText')) ?>
+				<?= nl2br($esc($val('leadText'))) ?>
 			  </div>
 			  <?php endif; ?>
 			</td>
