@@ -29,7 +29,11 @@ class PLMailService extends Wire {
 			$ctaKey       = $isMulti ? 'mail.multi.cta'       : 'mail.single.cta';
 			$preheader = strtr($mod->t($preheaderKey), $repl);
 			$headline  = $mod->t($headlineKey);
-			$leadText  = strtr($mod->t($bodyKey), $repl);
+			// Prepend the order-confirmation heading + body so the access mail
+			// reads like the order-confirmation mail and adds the access block.
+			$leadText  = $mod->t('mail.order.title') . "\n\n"
+			           . $mod->t('mail.order.body')  . "\n\n"
+			           . strtr($mod->t($bodyKey), $repl);
 			$ctaText   = strtr($mod->t($ctaKey), $repl);
 			$productUrl= (string)($links[0]['url'] ?? '#');
 			$subject   = ($mod->subjectPrefix ?? '') . strtr($mod->t($subjectKey), $repl);
