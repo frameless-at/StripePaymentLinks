@@ -188,7 +188,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 
 		// Service / redeemable product (full withdrawal right)
 		'mail.fagg.withdrawal_section_title' => $this->_('Right of withdrawal'),
-		'mail.fagg.withdrawal_instructions'  => $this->_("You have the right to withdraw from this contract within 14 days without giving any reason. The withdrawal period expires 14 days from the day of contract conclusion.\n\nTo exercise your right of withdrawal, please send us a clear declaration (e.g. by email to {contact_email}). You may use the model withdrawal form below, but it is not mandatory."),
+		'mail.fagg.withdrawal_instructions'  => $this->_("You have the right to withdraw from this contract within 14 days without giving any reason. The withdrawal period expires 14 days from the day of contract conclusion.\n\nTo exercise your right of withdrawal, please send us a clear declaration (e.g. by email to {contact_email})."),
 		'mail.fagg.withdrawal_form_link_label' => $this->_('Open prepared withdrawal email'),
 		'mail.fagg.withdrawal_form_link_help'  => $this->_('Opens your mail program with a pre-filled message you only need to send.'),
 		'mail.fagg.withdrawal_mailto_subject'  => $this->_('Withdrawal — order {order_id}'),
