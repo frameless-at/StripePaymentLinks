@@ -294,12 +294,23 @@ jurisdiction-neutral. You write the texts that match your jurisdiction
 (Austria FAGG, Germany BGB, France Code de la consommation, …) once in
 the module config and they appear in every confirmation mail.
 
-### Available placeholders inside both texts
+### Available placeholders inside the texts
 
+Simple value placeholders (replaced with the matching string):
 `{products}`, `{provider}`, `{contact_email}`, `{order_id}`,
-`{order_date}`, `{name}`, `{email}`, `{today}`, `{withdrawal_mailto}`
-(href for a pre-filled mailto: link), `{withdrawal_online}` (URL to
-trigger the online withdrawal modal).
+`{order_date}`, `{name}`, `{email}`, `{today}`.
+
+Anchor-pair placeholders (rendered as `<a href="…">linktext</a>` —
+TinyMCE strips raw `{…}` inside `href`, so a wrapping pair is the only
+way to keep the linktext separate from the URL):
+
+- `{withdrawal_mail}LINKTEXT{withdrawal_mail_end}` — pre-filled
+  `mailto:` (subject + body filled from the order data)
+- `{withdrawal_online}LINKTEXT{withdrawal_online_end}` — site root +
+  `?withdraw=1` (opens the online withdrawal modal)
+
+For a plain mailto: to the contact address, use TinyMCE's link tool
+directly — no placeholder needed.
 
 ### Setup
 
@@ -307,12 +318,11 @@ trigger the online withdrawal modal).
    - **Privacy policy page** (page selector)
    - **Terms and Conditions page** (page selector)
    - **Contact email for withdrawal** (used inside the `{contact_email}`
-     and `{withdrawal_mailto}` placeholders; falls back to the sender
+     and `{withdrawal_mail}` placeholders; falls back to the sender
      email when empty)
-2. In **Mail defaults & branding**:
    - **Withdrawal text** — TinyMCE; see placeholders above
    - **Waiver text** — TinyMCE; see placeholders above
-3. The pre-filled mailto: link (subject + body) is editable via the
+2. The pre-filled mailto: link (subject + body) is editable via the
    ProcessWire Translator under `mail.fagg.withdrawal_mailto_subject`
    and `mail.fagg.withdrawal_mailto_body`.
 

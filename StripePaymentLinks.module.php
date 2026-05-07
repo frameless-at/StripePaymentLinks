@@ -183,7 +183,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		'mail.order.tagline'   => $this->_('Order confirmation'),
 
 		// ===== MAIL: pre-filled mailto for the withdrawal model form =====
-		// Used by the {withdrawal_mailto} placeholder inside mailWithdrawalText.
+		// Used by the {withdrawal_mail} anchor-pair placeholder inside mailWithdrawalText.
 		// All other consumer-rights text is now site-pflegbar via the two
 		// TinyMCE config fields (mailWithdrawalText / mailWaiverText) — no
 		// hardcoded jurisdiction-specific defaults shipped with the module.
