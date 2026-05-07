@@ -604,7 +604,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			$wd->name  = 'mailWithdrawalText';
 			$wd->label = 'Withdrawal text — right of withdrawal applies';
 			$wd->description = 'Rendered in the order-confirmation mail when the order contains non-gated products (no requires_access). Use this for the legal withdrawal instructions and links.';
-			$wd->notes = 'Placeholders: {products}, {provider}, {contact_email}, {order_id}, {order_date}, {name}, {email}, {today}, {withdrawal_mailto} (pre-filled mailto: link for the consumer\'s withdrawal declaration), {withdrawal_online} (URL that opens the online withdrawal modal). Don\'t include universal wording like the durable-medium notice here — put it in "Additional mail note" so it renders only once per mail.';
+			$wd->notes = '{products}, {provider}, {contact_email}, {order_id}, {order_date}, {name}, {email}, {today}, {withdrawal_mail}…{withdrawal_mail_end}, {withdrawal_mailto}…{withdrawal_mailto_end}, {withdrawal_online}…{withdrawal_online_end}';
 			$wd->attr('rows', 8);
 			$wd->attr('value', (string)$this->get('mailWithdrawalText'));
 			$fsW->add($wd);
@@ -620,7 +620,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			$wv->name  = 'mailWaiverText';
 			$wv->label = 'Waiver text — right of withdrawal does not apply';
 			$wv->description = 'Rendered in the order-confirmation mail when the order contains gated digital products (requires_access=1). Use this for the waiver acknowledgment.';
-			$wv->notes = 'Placeholders: {products}, {provider}, {order_id}, {order_date}, {name}, {email}, {today}. Withdrawal-specific placeholders ({withdrawal_mailto}, {withdrawal_online}, {contact_email}) are not applicable here — the right of withdrawal has been waived. Don\'t include universal wording like the durable-medium notice here — put it in "Additional mail note" so it renders only once per mail.';
+			$wv->notes = '{products}, {provider}, {order_id}, {order_date}, {name}, {email}, {today}';
 			$wv->attr('rows', 8);
 			$wv->attr('value', (string)$this->get('mailWaiverText'));
 			$fsW->add($wv);

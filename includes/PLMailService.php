@@ -239,15 +239,23 @@ class PLMailService extends Wire {
 	 * Replace placeholders in a TinyMCE-edited text with values derived from
 	 * the order context. Returns raw HTML (caller writes it unescaped).
 	 *
-	 * Supported placeholders:
+	 * Simple value placeholders:
 	 *   {products}, {provider}, {contact_email},
-	 *   {order_id}, {order_date}, {name}, {email}, {today},
-	 *   {withdrawal_mailto}  — pre-filled mailto: URL
-	 *   {withdrawal_online}  — site root + ?withdraw=1
+	 *   {order_id}, {order_date}, {name}, {email}, {today}
+	 *
+	 * Anchor-pair placeholders (rendered as <a href="…">linktext</a> — TinyMCE
+	 * strips/normalizes raw {…} inside href attributes, so a wrapping pair is
+	 * the only way to let editors keep linktext separate from the URL):
+	 *   {withdrawal_mail}LINKTEXT{withdrawal_mail_end}    — simple mailto: to
+	 *                                                       the contact email
+	 *   {withdrawal_mailto}LINKTEXT{withdrawal_mailto_end}— pre-filled mailto:
+	 *                                                       (subject + body)
+	 *   {withdrawal_online}LINKTEXT{withdrawal_online_end}— site root + ?withdraw=1
 	 */
 	private function expandPlaceholders(StripePaymentLinks $mod, string $html, array $items, array $orderMeta): string
 	{
 		$config = wire('config');
+		$h = fn($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
 
 		$titles = [];
 		foreach ($items as $p) {
@@ -263,17 +271,31 @@ class PLMailService extends Wire {
 		$provider = (string) ($mod->mailFromName ?? ($config->siteName ?? $config->httpHost ?? ''));
 		$root     = rtrim((string) $config->urls->httpRoot, '/');
 
+		// Anchor-pair placeholders first — replaced with <a> tags. The
+		// TinyMCE editor saves the inner LINKTEXT as is; we just wrap.
+		$urls = [
+			'withdrawal_mail'   => $contactEmail !== '' ? 'mailto:' . rawurlencode($contactEmail) : '',
+			'withdrawal_mailto' => $this->buildWithdrawalMailto($mod, $items, $contactEmail, $orderMeta),
+			'withdrawal_online' => $root . '/?withdraw=1',
+		];
+		foreach ($urls as $key => $url) {
+			$pattern = '/\{' . preg_quote($key, '/') . '\}(.*?)\{' . preg_quote($key . '_end', '/') . '\}/s';
+			$html = preg_replace_callback($pattern, function($m) use ($url, $h) {
+				if ($url === '') return $m[1]; // no URL → fall back to plain linktext
+				return '<a href="' . $h($url) . '">' . $m[1] . '</a>';
+			}, $html);
+		}
+
+		// Simple value placeholders
 		$repl = [
-			'{products}'         => $products !== '' ? $products : '—',
-			'{provider}'         => $provider,
-			'{contact_email}'    => $contactEmail,
-			'{order_id}'         => (string) ($orderMeta['session_id'] ?? '—'),
-			'{order_date}'       => (string) ($orderMeta['order_date'] ?? '—'),
-			'{name}'             => (string) ($orderMeta['name']  ?? '—'),
-			'{email}'            => (string) ($orderMeta['email'] ?? '—'),
-			'{today}'            => date('Y-m-d'),
-			'{withdrawal_online}'=> $root . '/?withdraw=1',
-			'{withdrawal_mailto}'=> $this->buildWithdrawalMailto($mod, $items, $contactEmail, $orderMeta),
+			'{products}'      => $products !== '' ? $products : '—',
+			'{provider}'      => $provider,
+			'{contact_email}' => $contactEmail,
+			'{order_id}'      => (string) ($orderMeta['session_id'] ?? '—'),
+			'{order_date}'    => (string) ($orderMeta['order_date'] ?? '—'),
+			'{name}'          => (string) ($orderMeta['name']  ?? '—'),
+			'{email}'         => (string) ($orderMeta['email'] ?? '—'),
+			'{today}'         => date('Y-m-d'),
 		];
 		return strtr($html, $repl);
 	}
