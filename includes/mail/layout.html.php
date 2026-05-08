@@ -54,18 +54,31 @@ $showInfo = $has('extraCtas') || $has('closingText') || $has('signatureName');
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title><?= $esc($val('productTitle')) ?></title>
   <style>
+	body, table, td { font-family: Lato, Arial, sans-serif; }
+	body  { color:#333; line-height:1.55; }
+	h2    { font-size:22px; font-weight:700; color:#111; margin:0; }
+	h3    { font-size:18px; font-weight:700; color:#111; margin:14px 0 6px 0; }
+	p     { font-size:17px; color:#111; margin:0 0 12px 0; }
+	.header-bar, .brand-name, .brand-tagline { color:#fff; }
+	.brand-name    { font-size:18px; font-weight:700; }
+	.brand-tagline { font-size:12px; }
+	.btn-link      { font-size:16px; font-weight:700; color:#fff; text-decoration:none; }
+	.info-cell, .info-cell p   { font-size:15px; color:#374151; }
+	.extra-cta-h   { font-size:16px; font-weight:700; color:#111; }
+	.extra-cta     { font-size:15px; }
+	.extra-note, .extra-note p { font-size:13px; color:#6b7280; line-height:1.5; }
+	.footer-note   { font-size:12px; color:#666; }
+	.brand-link, .brand-link:link, .brand-link:visited { color:<?= $esc($brandColor) ?>; }
 	@media (max-width: 600px){
 	  .wrapper{ padding:12px !important; }
-	  .h1     { font-size:20px !important; }
-	  .lead   { font-size:16px !important; }
 	  .btn    { width:100% !important; display:block !important; }
 	  .px     { padding-left:18px !important; padding-right:18px !important; }
 	}
   </style>
 </head>
-<body style="margin:0;padding:0;background:#eee;font-family:Lato, Arial, sans-serif;color:#333;line-height:1.55;">
+<body style="margin:0;padding:0;background:#eee;">
   <?php if ($has('preheader')): ?>
-  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">
 	<?= $esc($val('preheader')) ?>
   </div>
   <?php endif; ?>
@@ -77,7 +90,7 @@ $showInfo = $has('extraCtas') || $has('closingText') || $has('signatureName');
 
 		  <!-- Header -->
 		  <tr>
-			<td class="px" style="background:<?= $esc($brandColor) ?>;padding:18px 22px;color:#fff;">
+			<td class="px header-bar" style="background:<?= $esc($brandColor) ?>;padding:18px 22px;">
 			  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
 				<tr>
 				  <td align="left" style="vertical-align:middle;">
@@ -86,14 +99,14 @@ $showInfo = $has('extraCtas') || $has('closingText') || $has('signatureName');
 						   alt="<?= $esc($brandHeader ?: $val('fromName')) ?>"
 						   style="max-height:44px;max-width:100%;display:block;border:0;">
 					<?php elseif ($brandHeader !== ''): ?>
-					  <div style="font-weight:700;font-size:18px;letter-spacing:.2px;">
+					  <div class="brand-name" style="letter-spacing:.2px;">
 						<?= $esc($brandHeader) ?>
 					  </div>
 					<?php endif; ?>
 				  </td>
 				  <td align="right" style="vertical-align:middle;">
 					<?php if ($has('headerTagline')): ?>
-					  <div style="font-size:12px;opacity:.9;color:#fff;">
+					  <div class="brand-tagline" style="opacity:.9;">
 						<?= $esc($val('headerTagline')) ?>
 					  </div>
 					<?php endif; ?>
@@ -106,19 +119,15 @@ $showInfo = $has('extraCtas') || $has('closingText') || $has('signatureName');
 		  <!-- Headline + (optional) sub-headline + Lead -->
 		  <tr>
 			<td class="px" style="padding:26px 22px 10px 22px;">
-			  <h2 style="font-size:22px;font-weight:700;margin:0;color:#111;">
-				<?= $headlineOut ?>
-			  </h2>
+			  <h2><?= $headlineOut ?></h2>
 			  <?php if ($has('subHeadline')): ?>
-			  <h3 style="font-size:18px;font-weight:700;margin:14px 0 6px 0;color:#111;">
-				<?= $esc($val('subHeadline')) ?>
-			  </h3>
+			  <h3><?= $esc($val('subHeadline')) ?></h3>
 			  <?php endif; ?>
 			  <?php if ($has('leadText')): ?>
 			  <?php foreach (preg_split('/\n{2,}/', trim((string)$val('leadText'))) as $__para):
 					$__para = trim($__para);
 					if ($__para === '') continue; ?>
-				<p style="font-size:17px;margin:0 0 12px 0;color:#111;"><?= nl2br($esc($__para)) ?></p>
+				<p><?= nl2br($esc($__para)) ?></p>
 			  <?php endforeach; ?>
 			  <?php endif; ?>
 			</td>
@@ -132,9 +141,8 @@ $showInfo = $has('extraCtas') || $has('closingText') || $has('signatureName');
 				<tr>
 				  <td bgcolor="<?= $esc($brandColor) ?>"
 					  style="border-radius:9999px; mso-padding-alt:14px 32px;">
-					<a href="<?= $esc($val('productUrl')) ?>"
-					   style="display:inline-block; padding:14px 32px; font-weight:700; font-size:16px;
-							  color:#ffffff; text-decoration:none; font-family:Lato, Arial, sans-serif;
+					<a class="btn-link" href="<?= $esc($val('productUrl')) ?>"
+					   style="display:inline-block; padding:14px 32px;
 							  border-radius:9999px; background:<?= $esc($brandColor) ?>;">
 					  <?= $esc($val('ctaText')) ?>
 					</a>
@@ -148,7 +156,7 @@ $showInfo = $has('extraCtas') || $has('closingText') || $has('signatureName');
 		  <!-- Info section (auto if any relevant piece exists) -->
 		  <?php if ($showInfo): ?>
 		  <tr>
-			<td class="px" style="padding:0 22px 24px 22px;font-size:15px;color:#374151;">
+			<td class="px info-cell" style="padding:0 22px 24px 22px;">
 			  <?php if ($has('infoLabel') && $has('productTitle')): ?>
 				<p style="margin:12px 0 6px 0;">
 				  <?= $esc($val('infoLabel')) ?>:
@@ -159,8 +167,8 @@ $showInfo = $has('extraCtas') || $has('closingText') || $has('signatureName');
 			  <?php if ($has('productUrl') && $has('extraCtas')): ?>
 			  <div style="margin:0;">
 				<?= $esc($directLabel) ?>:
-				<a href="<?= $esc($val('productUrl')) ?>"
-				   style="color:<?= $esc($brandColor) ?>;text-decoration:underline;"><?= $esc($has('ctaText') ? $val('ctaText') : $val('productTitle')) ?></a>
+				<a class="brand-link" href="<?= $esc($val('productUrl')) ?>"
+				   style="text-decoration:underline;"><?= $esc($has('ctaText') ? $val('ctaText') : $val('productTitle')) ?></a>
 			  </div>
 			  <?php endif; ?>
 
@@ -182,7 +190,7 @@ $showInfo = $has('extraCtas') || $has('closingText') || $has('signatureName');
 			<td class="px" style="padding:0 22px 20px 22px;">
 			  <hr style="border:none;border-top:1px solid #eee;margin:0 0 16px 0;">
 			  <?php if ($has('extraHeading')): ?>
-				<div style="font-size:16px;font-weight:700;margin:0 0 6px 0;color:#111;"><?= $esc($val('extraHeading')) ?></div>
+				<div class="extra-cta-h" style="margin:0 0 6px 0;"><?= $esc($val('extraHeading')) ?></div>
 			  <?php endif; ?>
 			  <?php foreach ((array)$val('extraCtas') as $c): ?>
 				<?php
@@ -190,10 +198,10 @@ $showInfo = $has('extraCtas') || $has('closingText') || $has('signatureName');
 				  $curl= isset($c['url'])   ? (string)$c['url']         : '#';
 				  if ($curl === '') continue;
 				?>
-				<div style="margin:6px 0;font-size:15px;">
+				<div class="extra-cta" style="margin:6px 0;">
 				  <?php if ($ct !== ''): ?><b><?= $esc($ct) ?>:</b> <?php endif; ?>
-				  <a href="<?= $esc($curl) ?>"
-					 style="color:<?= $esc($brandColor) ?>;text-decoration:underline;word-break:break-all;">
+				  <a class="brand-link" href="<?= $esc($curl) ?>"
+					 style="text-decoration:underline;word-break:break-all;">
 					<?= $esc($curl) ?>
 				  </a>
 				</div>
@@ -214,7 +222,7 @@ $showInfo = $has('extraCtas') || $has('closingText') || $has('signatureName');
 		  <!-- Extra note (e.g. legal disclaimer / waiver of right of withdrawal) -->
 		  <?php if ($has('extraNote')): ?>
 		  <tr>
-			<td class="px" style="padding:0 22px 18px 22px;font-size:13px;color:#6b7280;line-height:1.5;">
+			<td class="px extra-note" style="padding:0 22px 18px 22px;">
 			  <?php
 				$__note = (string)$val('extraNote');
 				// If TinyMCE/HTML content, render raw; if plain text, escape and preserve line breaks.
@@ -231,7 +239,7 @@ $showInfo = $has('extraCtas') || $has('closingText') || $has('signatureName');
 		  <!-- Footer note -->
 		  <?php if ($has('footerNote')): ?>
 		  <tr>
-			<td style="background:#f8fafc;padding:14px 22px;border-top:1px solid #eee;color:#666;font-size:12px;">
+			<td class="footer-note" style="background:#f8fafc;padding:14px 22px;border-top:1px solid #eee;">
 			  <?= $esc($val('footerNote')) ?>
 			</td>
 		  </tr>
