@@ -1697,6 +1697,13 @@ public function processCheckout(Page $currentPage): void {
 		$templates = $this->wire('templates');
 		$modules   = $this->wire('modules');
 
+		// One-shot cleanup: drop legacy termsPage key from stored module config
+		$cfg = $modules->getConfig('StripePaymentLinks');
+		if (is_array($cfg) && array_key_exists('termsPage', $cfg)) {
+			unset($cfg['termsPage']);
+			$modules->saveConfig('StripePaymentLinks', $cfg);
+		}
+
 		$userTpl = $templates->get('user');
 		if (!$userTpl || !$userTpl->id) return;
 

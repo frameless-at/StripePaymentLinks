@@ -68,7 +68,6 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			'withdrawalNotificationEmail' => '',
 			'withdrawalContactEmail'      => '',
 			'privacyPage'                 => 0,
-			'termsPage'                   => 0,
 		];
 	}
 
@@ -572,16 +571,6 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			$wdContact->columnWidth = 50;
 			$wdContact->attr('value', (string) $this->get('withdrawalContactEmail'));
 			$fsW->add($wdContact);
-
-			/** @var \ProcessWire\InputfieldPageListSelect $terms */
-			$terms = $this->modules->get('InputfieldPageListSelect');
-			$terms->name  = 'termsPage';
-			$terms->label = 'Terms and Conditions page';
-			$terms->description = 'Page linked from order-confirmation mails as "Terms and Conditions".';
-			$terms->columnWidth = 50;
-			$terms->parent_id = 1;
-			$terms->attr('value', (int) $this->get('termsPage'));
-			$fsW->add($terms);
 
 			/** @var \ProcessWire\InputfieldPageListSelect $priv */
 			$priv = $this->modules->get('InputfieldPageListSelect');
