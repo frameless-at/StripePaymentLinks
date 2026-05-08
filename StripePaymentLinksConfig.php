@@ -563,15 +563,15 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			$notify->attr('value', (string) $this->get('withdrawalNotificationEmail'));
 			$fsW->add($notify);
 
-			/** @var \ProcessWire\InputfieldPageListSelect $priv */
-			$priv = $this->modules->get('InputfieldPageListSelect');
-			$priv->name  = 'privacyPage';
-			$priv->label = 'Privacy policy page';
-			$priv->description = 'Page used as the GDPR link in the withdrawal form.';
-			$priv->columnWidth = 50;
-			$priv->parent_id = 1;
-			$priv->attr('value', (int) $this->get('privacyPage'));
-			$fsW->add($priv);
+			/** @var \ProcessWire\InputfieldEmail $wdContact */
+			$wdContact = $this->modules->get('InputfieldEmail');
+			$wdContact->name  = 'withdrawalContactEmail';
+			$wdContact->label = 'Contact email for withdrawal';
+			$wdContact->description = 'Address shown in withdrawal instructions and used inside the {contact_email} / {withdrawal_mail} placeholders.';
+			$wdContact->notes = 'Empty = falls back to the sender email above.';
+			$wdContact->columnWidth = 50;
+			$wdContact->attr('value', (string) $this->get('withdrawalContactEmail'));
+			$fsW->add($wdContact);
 
 			/** @var \ProcessWire\InputfieldPageListSelect $terms */
 			$terms = $this->modules->get('InputfieldPageListSelect');
@@ -583,15 +583,15 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			$terms->attr('value', (int) $this->get('termsPage'));
 			$fsW->add($terms);
 
-			/** @var \ProcessWire\InputfieldEmail $wdContact */
-			$wdContact = $this->modules->get('InputfieldEmail');
-			$wdContact->name  = 'withdrawalContactEmail';
-			$wdContact->label = 'Contact email for withdrawal';
-			$wdContact->description = 'Address shown in withdrawal instructions and used inside the {contact_email} / {withdrawal_mail} placeholders.';
-			$wdContact->notes = 'Empty = falls back to the sender email above.';
-			$wdContact->columnWidth = 100;
-			$wdContact->attr('value', (string) $this->get('withdrawalContactEmail'));
-			$fsW->add($wdContact);
+			/** @var \ProcessWire\InputfieldPageListSelect $priv */
+			$priv = $this->modules->get('InputfieldPageListSelect');
+			$priv->name  = 'privacyPage';
+			$priv->label = 'Privacy policy page';
+			$priv->description = 'Page used as the GDPR link in the withdrawal form.';
+			$priv->columnWidth = 50;
+			$priv->parent_id = 1;
+			$priv->attr('value', (int) $this->get('privacyPage'));
+			$fsW->add($priv);
 
 			// Withdrawal text — rendered for products with right of withdrawal
 			$wd = null;
