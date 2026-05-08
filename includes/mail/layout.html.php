@@ -106,18 +106,20 @@ $showInfo = $has('extraCtas') || $has('closingText') || $has('signatureName');
 		  <!-- Headline + (optional) sub-headline + Lead -->
 		  <tr>
 			<td class="px" style="padding:26px 22px 10px 22px;">
-			  <div class="h1" style="font-size:22px;font-weight:700;margin:0 0 4px 0;color:#111;">
+			  <h2 style="font-size:22px;font-weight:700;margin:0;color:#111;">
 				<?= $headlineOut ?>
-			  </div>
+			  </h2>
 			  <?php if ($has('subHeadline')): ?>
-			  <div style="font-size:18px;font-weight:700;margin:14px 0 4px 0;color:#111;">
+			  <h3 style="font-size:18px;font-weight:700;margin:14px 0 6px 0;color:#111;">
 				<?= $esc($val('subHeadline')) ?>
-			  </div>
+			  </h3>
 			  <?php endif; ?>
 			  <?php if ($has('leadText')): ?>
-			  <div class="lead" style="font-size:17px;margin:6px 0 18px 0;color:#111;">
-				<?= nl2br($esc($val('leadText'))) ?>
-			  </div>
+			  <?php foreach (preg_split('/\n{2,}/', trim((string)$val('leadText'))) as $__para):
+					$__para = trim($__para);
+					if ($__para === '') continue; ?>
+				<p style="font-size:17px;margin:0 0 12px 0;color:#111;"><?= nl2br($esc($__para)) ?></p>
+			  <?php endforeach; ?>
 			  <?php endif; ?>
 			</td>
 		  </tr>
