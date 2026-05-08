@@ -63,7 +63,7 @@ class PLMailService extends Wire {
 			'footerNote'    => $mod->t('mail.common.footer_note'),
 			'infoLabel'     => '',
 			'extraHeading'  => $mod->t('mail.common.extra_heading'),
-			'closingText'   => '',
+			'closingText'   => $mod->t('mail.order.closing'),
 			'signatureName' => (string)($mod->mailSignatureName ?? $mod->mailFromName ?? ''),
 			'directLabel'   => $mod->t('mail.common.direct_link'),
 			'extraCtas'     => $isMulti ? array_map(

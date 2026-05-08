@@ -181,6 +181,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		'mail.order.title'     => $this->_('thank you for your order!'),
 		'mail.order.body'      => $this->_('We have received your order. Please find the order details in the receipt sent by Stripe in parallel.'),
 		'mail.order.tagline'   => $this->_('Order confirmation'),
+		'mail.order.closing'   => $this->_('Best regards,'),
 
 		// ===== MAIL: pre-filled mailto for the withdrawal model form =====
 		// Used by the {withdrawal_mail} anchor-pair placeholder inside mailWithdrawalText.
