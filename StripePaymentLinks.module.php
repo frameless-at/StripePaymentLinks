@@ -226,10 +226,12 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		'withdrawal.field.reason'         => $this->_('Reason (optional)'),
 		'withdrawal.field.reason_help'    => $this->_('You are not legally required to give a reason.'),
 
-		// ===== WITHDRAWAL: GDPR / privacy =====
+		// ===== WITHDRAWAL: privacy notice =====
 		// {link_start} / {link_end} are replaced with <a>/</a> when a privacy
-		// page is configured; with empty strings otherwise.
-		'withdrawal.privacy.notice'       => $this->_('Your data will be processed only to handle your withdrawal (legal basis: Art. 6(1)(c) GDPR). For details see our {link_start}privacy policy{link_end}.'),
+		// page is configured; with empty strings otherwise. Default wording is
+		// jurisdiction-neutral — operators add the local legal-basis citation
+		// (GDPR Art. 6, revDSG, CCPA, etc.) on the linked privacy page.
+		'withdrawal.privacy.notice'       => $this->_('Your data will be processed only to handle your withdrawal. For details see our {link_start}privacy policy{link_end}.'),
 
 		// ===== WITHDRAWAL: error messages =====
 		'withdrawal.error.required'       => $this->_('Please fill in all required fields.'),
