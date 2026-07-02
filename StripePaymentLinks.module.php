@@ -301,9 +301,8 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		}
 
 		// Freebies (lead-capture) live in core but stay DORMANT until configured.
-		// Register their hooks (each self-gates) + config-gated provisioning: the
-		// freebie fields/role are created only when Freebie templates are configured.
-		$this->freebies()->initHooks();
+		// Config-gated provisioning: the freebie fields/role are created only per
+		// config. (The freebie hooks themselves are registered LAST, see below.)
 		$this->addHookAfter('Modules::saveConfig', function(\ProcessWire\HookEvent $e) {
 			$class = $e->arguments(0);
 			$class = is_object($class) ? $class->className() : (string) $class;
@@ -324,6 +323,12 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		$this->addHook('/stripepaymentlinks/api', function($event) {
 			$this->api()->handle($event);
 		});
+
+		// Freebie hooks LAST: the freebie_register handler on /stripepaymentlinks/api
+		// must be registered AFTER the core handler so it runs last and wins —
+		// otherwise the core "unknown action" fallback clobbers the freebie response.
+		// All freebie hooks self-gate, so they stay inert without configuration.
+		$this->freebies()->initHooks();
 
 		$this->addHookAfter('Modules::saveConfig', function($e){
 			$m    = $e->arguments(0);
