@@ -181,7 +181,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		$cbReg = $this->modules->get('InputfieldCheckbox');
 		$cbReg->name  = 'showRegisterLink';
 		$cbReg->label = 'Offer registration link ("Create an account")';
-		$cbReg->notes = 'Adds a link that opens the registration modal. Requires the Freebies feature to be configured (Freebie templates below).';
+		$cbReg->notes = 'Adds a link that opens the registration modal — creates a free member account (no purchase or freebie needed).';
 		$cbReg->columnWidth = 34;
 		$cbReg->attr('checked', (bool)$this->get('showRegisterLink'));
 		$fsLogin->add($cbReg);

@@ -136,19 +136,33 @@ class PLFreebies extends Wire {
 
   /**
    * Config-gated provisioning. Called from the core module's Modules::saveConfig
-   * hook when the StripePaymentLinks config is saved. Provisions the fields/role
-   * ONLY when Freebie templates are configured — so a pure-selling install (and a
-   * plain core upgrade) never gets these fields: feature present, but dormant.
+   * hook when the StripePaymentLinks config is saved. Each piece is provisioned
+   * independently by what's actually enabled: the `member` role for any signup
+   * (registration link / register template / freebies), register-template fields
+   * for a dedicated register page, and the freebie fields for Freebie templates.
+   * Nothing enabled → nothing provisioned (a pure-selling install / plain core
+   * upgrade never gets these fields): feature present, but dormant.
    *
    * @param array $data The saved StripePaymentLinks config.
    */
   public function provision(array $data): void {
     $freebieTpls = (array) ($data['freebieTemplateNames'] ?? []);
-    if (!$freebieTpls) return; // nothing configured → no freebies, stay dormant
-    $this->ensureMemberRole();
-    $this->ensureFreebieField($freebieTpls);
-    $this->ensurePlFreeAccessField($freebieTpls);
-    $this->ensureRegisterFields((string) ($data['freebieRegisterTemplate'] ?? ''));
+    $regTpl      = (string) ($data['freebieRegisterTemplate'] ?? '');
+    $showReg     = !empty($data['showRegisterLink']);
+
+    // The `member` role is needed for ANY member signup — registration alone
+    // (showRegisterLink) is enough; it does NOT depend on freebie templates.
+    if ($showReg || $regTpl !== '' || $freebieTpls) $this->ensureMemberRole();
+
+    // Register template fields (only for a dedicated register page).
+    if ($regTpl !== '') $this->ensureRegisterFields($regTpl);
+
+    // Freebie gating fields (only when Freebie templates are configured).
+    if ($freebieTpls) {
+      $this->ensureFreebieField($freebieTpls);
+      $this->ensurePlFreeAccessField($freebieTpls);
+    }
+    // Nothing configured → nothing provisioned (feature stays dormant).
   }
 
   /**
