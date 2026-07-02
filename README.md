@@ -103,6 +103,11 @@ The module is designed for small e-commerce or membership scenarios where a full
    echo $modules->get('StripePaymentLinks')->render($page);
    ```
 
+   > ⚠️ **Echo the return value inside `<body>`, conventionally just before `</body>`.**
+   > `render()` returns the global frontend chrome — the auth/withdrawal **modals plus their inline `<script>` blocks** (auto-open, tooltip init, global AJAX handler). Because it looks like a global/init call it is tempting to place it at the very top of a layout file (e.g. `_main.php`, before `<!DOCTYPE html>`), but there the modal markup and scripts end up **outside `<html>`**, producing invalid HTML and scripts the browser will not execute.
+   >
+   > Bootstrap, if enabled, is auto-injected into `<head>` by a hook. Only `render()`’s output is intentionally left for the template to position, so you control where in the body it appears. Its side effects (checkout processing, access-param handling, gating redirects) run regardless of the echo position.
+
   - On the thank-you page, the module will display an access buttons block if the checkout contained products that require access.
   - On delivery/product pages marked with requires_access, users are gated: if they are not logged in or have not purchased, they are redirected to the sales page and prompted to log in.
   - After first purchase, new users will see the set-password modal on the delivery page.
