@@ -569,13 +569,18 @@ class PLFreebies extends Wire {
     // unfilled. No site-specific field names.
     $rv = function($fname) use ($reg) { return ($reg && $reg->hasField($fname)) ? trim((string) $reg->get($fname)) : ''; };
 
-    $firstName = trim((string) ($user->get('user_name') ?: $user->title));
-    if ($firstName === '') { $at = strpos((string) $user->email, '@'); $firstName = $at !== false ? substr($user->email, 0, $at) : (string) $user->email; }
+    // We only store the member's full name (in `title`; user_name is a fallback).
+    // Derive a first name = first word, so the VORNAME placeholder is an actual
+    // first name; NAME keeps the full name. Fall back to the email local part.
+    $fullName = trim((string) ($user->get('user_name') ?: $user->title));
+    if ($fullName === '') { $at = strpos((string) $user->email, '@'); $fullName = $at !== false ? substr($user->email, 0, $at) : (string) $user->email; }
+    $firstName = trim((string) explode(' ', $fullName)[0]);
+    if ($firstName === '') $firstName = $fullName;
 
     $title     = ($freebie && $freebie->id) ? (string) $freebie->title : ($reg ? (string) $reg->title : '');
     $subject   = $rv('plf_mail_subject') !== '' ? $rv('plf_mail_subject') : $this->tLocal('mail.subject') . ($title !== '' ? ' – ' . $title : '');
     $greetRaw  = $rv('plf_mail_greeting');
-    $greeting  = $greetRaw !== '' ? strtr($greetRaw, ['VORNAME' => $firstName, 'NAME' => $firstName]) : strtr($this->tLocal('mail.greeting'), ['{name}' => $firstName]);
+    $greeting  = $greetRaw !== '' ? strtr($greetRaw, ['VORNAME' => $firstName, 'NAME' => $fullName]) : strtr($this->tLocal('mail.greeting'), ['{name}' => $firstName]);
     // New members: freebie welcome body (CMS plf_mail_body, else i18n mail.body).
     // Existing members re-registering: a distinct "you already have an account"
     // text so they aren't confused. The on-screen response stays generic (no
@@ -885,7 +890,7 @@ class PLFreebies extends Wire {
       'plf_redirect'      => ['FieldtypeURL',      '',    $this->_('Redirect after sign-up'),$this->_('Optional. URL to send the user to after a successful sign-up. Empty = the freebie page.')],
       'plf_success'       => ['FieldtypeTextarea', $rich, $this->_('Text – step 2'),       $this->_('Shown after the form is submitted and the confirmation email was sent.')],
       'plf_mail_subject'  => ['FieldtypeText',     '',    $this->_('Email: subject'),       ''],
-      'plf_mail_greeting' => ['FieldtypeText',     '',    $this->_('Email: greeting'),      $this->_('e.g. "Hey, VORNAME, …". Placeholders VORNAME / NAME are replaced with the first name.')],
+      'plf_mail_greeting' => ['FieldtypeText',     '',    $this->_('Email: greeting'),      $this->_('Placeholder VORNAME is replaced with the first name, NAME with the full name. Example: Hey VORNAME, ...')],
       'plf_mail_body'     => ['FieldtypeTextarea', $rich, $this->_('Email: text'),          $this->_('The email content sent to confirm the address.')],
       'plf_mail_button'   => ['FieldtypeText',     '',    $this->_('Email: button label'),  ''],
     ];
@@ -904,6 +909,11 @@ class PLFreebies extends Wire {
           $f->set('inputfieldClass', $inputfield);
           $f->set('contentType', 1); // 1 = HTML (markup/HTML content)
         }
+        $fields->save($f);
+      } elseif ((string) $f->label !== $flabel || (string) $f->description !== $fdesc) {
+        // Keep the module-owned label + help text in sync (self-heal on provision).
+        $f->label       = $flabel;
+        $f->description = $fdesc;
         $fields->save($f);
       }
       if (!$t->fieldgroup->hasField($fname)) { $t->fieldgroup->add($f); $changed = true; }
