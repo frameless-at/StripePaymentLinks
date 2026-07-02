@@ -304,7 +304,15 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		$js->notes = 'If empty js version 5.3.3 from jsdelivr.net is added.';
 		$js->showIf = 'autoLoadBootstrap=1';
 		$fsAssets->add($js);
-		
+
+		$icons = $this->modules->get('InputfieldText');
+		$icons->name  = 'bootstrapIconsCdn';
+		$icons->label = 'Bootstrap Icons CSS CDN URL';
+		$icons->attr('value', (string)$this->get('bootstrapIconsCdn'));
+		$icons->notes = 'Modules use bi bi-* icons. If your theme does not include Bootstrap Icons, the module injects them. If empty, bootstrap-icons 1.11.3 from jsdelivr.net is added.';
+		$icons->showIf = 'autoLoadBootstrap=1';
+		$fsAssets->add($icons);
+
 		$inputfields->add($fsAssets);
 		
 		/** -----------------------

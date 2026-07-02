@@ -1582,12 +1582,21 @@ public function processCheckout(Page $currentPage): void {
 		// if you also enqueue via $config->styles elsewhere, the above still catches it
 		return false;
 	}
+
+	/** Heuristics: detect if Bootstrap Icons are already present (CSS link or font). */
+	private function detectBootstrapIconsPresent(string $html): bool
+	{
+		if (preg_match('~["\']?[^"\']*bootstrap-icons~i', $html)) return true;
+		return false;
+	}
 	/** Inject $tags into <head> once, robust to casing/attributes and missing </head>. */
 	private function injectIntoHead(string $html, string $tags): string {
 		if ($tags === '') return $html;
 	
-		// Avoid duplicate injection if our marker is already present
-		if (stripos($html, 'id="spl-bootstrap-css"') !== false || stripos($html, 'id="spl-bootstrap-js"') !== false) {
+		// Avoid duplicate injection if one of our markers is already present
+		if (stripos($html, 'id="spl-bootstrap-css"') !== false
+			|| stripos($html, 'id="spl-bootstrap-js"') !== false
+			|| stripos($html, 'id="spl-bootstrap-icons"') !== false) {
 			return $html;
 		}
 
@@ -1615,17 +1624,30 @@ public function processCheckout(Page $currentPage): void {
 		}
 	
 		if (stripos($html, '<head>') === false) return $html;
-		if ($this->detectBootstrapPresent($html)) return $html;
-	
-		$css = trim((string)($this->bootstrapCssCdn ?? ''));
-		$js  = trim((string)($this->bootstrapJsCdn  ?? ''));
-		if ($css === '') $css = 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css';
-		if ($js  === '') $js  = 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js';
-	
-		$tags  = "\n<!-- StripePaymentLinks: Bootstrap CDN (frontend only) -->\n";
-		$tags .= '<link id="spl-bootstrap-css" rel="stylesheet" href="' . htmlspecialchars($css, ENT_QUOTES, 'UTF-8') . "\" crossorigin=\"anonymous\">\n";
-		$tags .= '<script id="spl-bootstrap-js" src="' . htmlspecialchars($js, ENT_QUOTES, 'UTF-8') . "\" defer crossorigin=\"anonymous\"></script>\n";
-	
+
+		$tags = '';
+
+		// Bootstrap CSS/JS — only if not already present on the page.
+		if (!$this->detectBootstrapPresent($html)) {
+			$css = trim((string)($this->bootstrapCssCdn ?? ''));
+			$js  = trim((string)($this->bootstrapJsCdn  ?? ''));
+			if ($css === '') $css = 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css';
+			if ($js  === '') $js  = 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js';
+			$tags .= '<link id="spl-bootstrap-css" rel="stylesheet" href="' . htmlspecialchars($css, ENT_QUOTES, 'UTF-8') . "\" crossorigin=\"anonymous\">\n";
+			$tags .= '<script id="spl-bootstrap-js" src="' . htmlspecialchars($js, ENT_QUOTES, 'UTF-8') . "\" defer crossorigin=\"anonymous\"></script>\n";
+		}
+
+		// Bootstrap Icons CSS — checked independently: the modules render `bi bi-*`
+		// icons, and a page may include Bootstrap itself but not the icons font.
+		if (!$this->detectBootstrapIconsPresent($html)) {
+			$icons = trim((string)($this->bootstrapIconsCdn ?? ''));
+			if ($icons === '') $icons = 'https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css';
+			$tags .= '<link id="spl-bootstrap-icons" rel="stylesheet" href="' . htmlspecialchars($icons, ENT_QUOTES, 'UTF-8') . "\" crossorigin=\"anonymous\">\n";
+		}
+
+		if ($tags === '') return $html;
+		$tags = "\n<!-- StripePaymentLinks: Bootstrap/Icons CDN (frontend only) -->\n" . $tags;
+
 		return $this->injectIntoHead($html, $tags);
 	}
 	
