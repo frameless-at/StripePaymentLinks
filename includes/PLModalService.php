@@ -286,8 +286,24 @@ final class PLModalService
 		$intro  = $this->mod->t('modal.login.body');
 		$btn    = $this->mod->t('modal.login.submit');
 		$cancel = $this->mod->t('modal.notice.cancel');
-		$forgot    = $this->mod->t('modal.login.forgot_link');
-		$forgotTip = $this->mod->t('modal.login.forgot_tooltip');
+		// Login procedure: which auxiliary links appear below the login form is
+		// decided centrally by the core config checkboxes (pl_login_procedure).
+		$info  = fn($tip) => ' <i class="bi bi-info-circle text-muted ms-1" style="cursor:help" data-bs-toggle="tooltip" title="'.$h($tip).'"></i>';
+		$links = '';
+		if ((bool)$this->mod->showResetLink) {
+			$links .= '<div><a href="#" data-bs-toggle="modal" data-bs-target="#resetRequestModal" data-bs-dismiss="modal">'
+				. $h($this->mod->t('modal.login.forgot_link')).'</a>'.$info($this->mod->t('modal.login.forgot_tooltip')).'</div>';
+		}
+		if ((bool)$this->mod->showLoginLink) {
+			$links .= '<div class="mt-2"><a href="#" data-bs-toggle="modal" data-bs-target="#loginLinkModal" data-bs-dismiss="modal">'
+				. $h($this->mod->t('modal.login.magiclink_link')).'</a>'.$info($this->mod->t('modal.login.magiclink_tooltip')).'</div>';
+		}
+		// Registration modal is provided by StripePlFreebies — only offer the link
+		// when it is installed (it injects #plfRegisterModal onto the page).
+		if ((bool)$this->mod->showRegisterLink && $this->mod->wire('modules')->isInstalled('StripePlFreebies')) {
+			$links .= '<div class="mt-2"><a href="#" data-bs-toggle="modal" data-bs-target="#plfRegisterModal" data-bs-dismiss="modal">'
+				. $h($this->mod->t('modal.login.register_link')).'</a>'.$info($this->mod->t('modal.login.register_tooltip')).'</div>';
+		}
 
 		$modal = [
 			'id'    => 'loginModal',
@@ -300,12 +316,7 @@ final class PLModalService
 					['type'=>'email','name'=>'email','label'=>$this->mod->t('modal.common.label_email'),'attrs'=>['required'=>true,'autocomplete'=>'username']],
 					['type'=>'password','name'=>'password','label'=>$this->mod->t('modal.common.label_password'),'attrs'=>['required'=>true,'autocomplete'=>'current-password']],
 				],
-				'afterFieldsHtml' =>
-					($this->mod->showLoginResetLink()
-						? '<div><a href="#" data-bs-toggle="modal" data-bs-target="#resetRequestModal" data-bs-dismiss="modal">'.$h($forgot).'</a>'
-						  .' <i class="bi bi-info-circle text-muted ms-1" style="cursor:help" data-bs-toggle="tooltip" title="'.$h($forgotTip).'"></i></div>'
-						: '')
-					.$this->mod->loginModalLinks(),
+				'afterFieldsHtml' => $links . $this->mod->loginModalLinks(),
 				'submitText' => $btn,
 				'cancelText' => $cancel,
 			],

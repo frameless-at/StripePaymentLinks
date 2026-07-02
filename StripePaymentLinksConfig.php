@@ -27,6 +27,11 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			'accessMailPolicy'       => 'newUsersOnly', // never | newUsersOnly | always
 			'accessTokenTtlMinutes'  => 30,
 
+			// Login procedure — which auxiliary links appear in the login modal
+			'showResetLink'          => 1, // "Forgot password?" (password reset)
+			'showLoginLink'          => 0, // passwordless "email me a login link"
+			'showRegisterLink'       => 0, // "create an account" (needs StripePlFreebies)
+
 			// Mail & Branding
 			'mailTemplatePath'       => '',
 			'logoUrl'                => '',
@@ -145,6 +150,35 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		$fs->add($ttl);
 
 		$inputfields->add($fs);
+
+		/* ---------- Login procedure ---------- */
+		$fsLogin = $this->modules->get('InputfieldFieldset');
+		$fsLogin->label = 'Login procedure';
+		$fsLogin->name  = 'pl_login_procedure';
+		$fsLogin->description = 'Which options are offered below the login form. With a customer area, a passwordless login link usually replaces the reset link (users change their password inside their account).';
+
+		$cbReset = $this->modules->get('InputfieldCheckbox');
+		$cbReset->name  = 'showResetLink';
+		$cbReset->label = 'Offer password reset link ("Forgot password?")';
+		$cbReset->notes = 'Turn this off when you offer the passwordless login link below and a customer area for changing the password.';
+		$cbReset->attr('checked', (bool)$this->get('showResetLink'));
+		$fsLogin->add($cbReset);
+
+		$cbLogin = $this->modules->get('InputfieldCheckbox');
+		$cbLogin->name  = 'showLoginLink';
+		$cbLogin->label = 'Offer passwordless login link ("Email me a login link")';
+		$cbLogin->notes = 'Emails a one-time magic link that signs the user in without a password (op=login_link).';
+		$cbLogin->attr('checked', (bool)$this->get('showLoginLink'));
+		$fsLogin->add($cbLogin);
+
+		$cbReg = $this->modules->get('InputfieldCheckbox');
+		$cbReg->name  = 'showRegisterLink';
+		$cbReg->label = 'Offer registration link ("Create an account")';
+		$cbReg->notes = 'Adds a link that opens the registration modal. Requires StripePlFreebies (it provides and injects the modal).';
+		$cbReg->attr('checked', (bool)$this->get('showRegisterLink'));
+		$fsLogin->add($cbReg);
+
+		$inputfields->add($fsLogin);
 
 		/* ---------- Mail & Branding ---------- */
 		$fsMail = $this->modules->get('InputfieldFieldset');
