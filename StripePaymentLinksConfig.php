@@ -165,7 +165,8 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		$cbReset = $this->modules->get('InputfieldCheckbox');
 		$cbReset->name  = 'showResetLink';
 		$cbReset->label = 'Offer password reset link ("Forgot password?")';
-		$cbReset->notes = 'Turn this off when you offer the passwordless login link below and a customer area for changing the password.';
+		$cbReset->notes = 'Turn this off when you offer the passwordless login link and a customer area for changing the password.';
+		$cbReset->columnWidth = 33;
 		$cbReset->attr('checked', (bool)$this->get('showResetLink'));
 		$fsLogin->add($cbReset);
 
@@ -173,13 +174,15 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		$cbLogin->name  = 'showLoginLink';
 		$cbLogin->label = 'Offer passwordless login link ("Email me a login link")';
 		$cbLogin->notes = 'Emails a one-time magic link that signs the user in without a password (op=login_link).';
+		$cbLogin->columnWidth = 33;
 		$cbLogin->attr('checked', (bool)$this->get('showLoginLink'));
 		$fsLogin->add($cbLogin);
 
 		$cbReg = $this->modules->get('InputfieldCheckbox');
 		$cbReg->name  = 'showRegisterLink';
 		$cbReg->label = 'Offer registration link ("Create an account")';
-		$cbReg->notes = 'Adds a link that opens the registration modal. Requires StripePlFreebies (it provides and injects the modal).';
+		$cbReg->notes = 'Adds a link that opens the registration modal. Requires the Freebies feature to be configured (Freebie templates below).';
+		$cbReg->columnWidth = 34;
 		$cbReg->attr('checked', (bool)$this->get('showRegisterLink'));
 		$fsLogin->add($cbReg);
 
