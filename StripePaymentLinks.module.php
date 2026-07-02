@@ -1673,8 +1673,8 @@ public function processCheckout(Page $currentPage): void {
 			$js  = trim((string)($this->bootstrapJsCdn  ?? ''));
 			if ($css === '') $css = 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css';
 			if ($js  === '') $js  = 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js';
-			$tags .= '<link id="spl-bootstrap-css" rel="stylesheet" href="' . htmlspecialchars($css, ENT_QUOTES, 'UTF-8') . "\" crossorigin=\"anonymous\">\n";
-			$tags .= '<script id="spl-bootstrap-js" src="' . htmlspecialchars($js, ENT_QUOTES, 'UTF-8') . "\" defer crossorigin=\"anonymous\"></script>\n";
+			$tags .= '<link id="spl-bootstrap-css" rel="stylesheet" href="' . htmlspecialchars($css, ENT_QUOTES, 'UTF-8') . "\">\n";
+			$tags .= '<script id="spl-bootstrap-js" src="' . htmlspecialchars($js, ENT_QUOTES, 'UTF-8') . "\" defer></script>\n";
 		}
 
 		// Bootstrap Icons CSS — checked independently: the modules render `bi bi-*`
@@ -1682,7 +1682,7 @@ public function processCheckout(Page $currentPage): void {
 		if (!$this->detectBootstrapIconsPresent($html)) {
 			$icons = trim((string)($this->bootstrapIconsCdn ?? ''));
 			if ($icons === '') $icons = 'https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css';
-			$tags .= '<link id="spl-bootstrap-icons" rel="stylesheet" href="' . htmlspecialchars($icons, ENT_QUOTES, 'UTF-8') . "\" crossorigin=\"anonymous\">\n";
+			$tags .= '<link id="spl-bootstrap-icons" rel="stylesheet" href="' . htmlspecialchars($icons, ENT_QUOTES, 'UTF-8') . "\">\n";
 		}
 
 		if ($tags === '') return $html;
