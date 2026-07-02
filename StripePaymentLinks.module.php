@@ -128,7 +128,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		'modal.resetreq.submit'      => $this->_('Send link'),
 
 		// Passwordless login link
-		'modal.login.magiclink_link' => $this->_('Sign in with a link instead'),
+		'modal.login.magiclink_link' => $this->_('Can’t sign in? Email me a login link'),
 		'modal.loginlink.title'      => $this->_('Sign in with a link'),
 		'modal.loginlink.body'       => $this->_('Enter your email — we’ll send you a link to sign in without a password.'),
 		'modal.loginlink.submit'     => $this->_('Send login link'),
@@ -1123,6 +1123,18 @@ public function processCheckout(Page $currentPage): void {
 	 */
 	public function ___loginModalLinks(): string {
 		return '';
+	}
+
+	/**
+	 * Hookable: show the "forgot password" (reset request) link in the login modal?
+	 * Default: true. An integrator that offers passwordless magic-link login can
+	 * hook this to return false, so the magic-link link REPLACES the reset link
+	 * instead of sitting next to it (both solve "I can't sign in").
+	 *
+	 * @return bool
+	 */
+	public function ___showLoginResetLink(): bool {
+		return true;
 	}
 
 	/**

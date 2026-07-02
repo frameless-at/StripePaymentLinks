@@ -301,8 +301,10 @@ final class PLModalService
 					['type'=>'password','name'=>'password','label'=>$this->mod->t('modal.common.label_password'),'attrs'=>['required'=>true,'autocomplete'=>'current-password']],
 				],
 				'afterFieldsHtml' =>
-					'<div><a href="#" data-bs-toggle="modal" data-bs-target="#resetRequestModal" data-bs-dismiss="modal">'.$h($forgot).'</a>'
-					.' <i class="bi bi-info-circle text-muted ms-1" style="cursor:help" data-bs-toggle="tooltip" title="'.$h($forgotTip).'"></i></div>'
+					($this->mod->showLoginResetLink()
+						? '<div><a href="#" data-bs-toggle="modal" data-bs-target="#resetRequestModal" data-bs-dismiss="modal">'.$h($forgot).'</a>'
+						  .' <i class="bi bi-info-circle text-muted ms-1" style="cursor:help" data-bs-toggle="tooltip" title="'.$h($forgotTip).'"></i></div>'
+						: '')
 					.$this->mod->loginModalLinks(),
 				'submitText' => $btn,
 				'cancelText' => $cancel,
