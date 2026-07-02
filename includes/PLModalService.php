@@ -298,9 +298,9 @@ final class PLModalService
 			$links .= '<div class="mt-2"><a href="#" data-bs-toggle="modal" data-bs-target="#loginLinkModal" data-bs-dismiss="modal">'
 				. $h($this->mod->t('modal.login.magiclink_link')).'</a>'.$info($this->mod->t('modal.login.magiclink_tooltip')).'</div>';
 		}
-		// Registration modal is provided by StripePlFreebies — only offer the link
-		// when it is installed (it injects #plfRegisterModal onto the page).
-		if ((bool)$this->mod->showRegisterLink && $this->mod->wire('modules')->isInstalled('StripePlFreebies')) {
+		// The registration modal (#plfRegisterModal) is provided/injected by the core
+		// freebies service when showRegisterLink is on (pl_login_procedure).
+		if ((bool)$this->mod->showRegisterLink) {
 			$links .= '<div class="mt-2"><a href="#" data-bs-toggle="modal" data-bs-target="#plfRegisterModal" data-bs-dismiss="modal">'
 				. $h($this->mod->t('modal.login.register_link')).'</a>'.$info($this->mod->t('modal.login.register_tooltip')).'</div>';
 		}

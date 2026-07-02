@@ -30,7 +30,12 @@ class StripePaymentLinksConfig extends ModuleConfig {
 			// Login procedure — which auxiliary links appear in the login modal
 			'showResetLink'          => 1, // "Forgot password?" (password reset)
 			'showLoginLink'          => 0, // passwordless "email me a login link"
-			'showRegisterLink'       => 0, // "create an account" (needs StripePlFreebies)
+			'showRegisterLink'       => 0, // "create an account" (needs Freebies configured)
+
+			// Freebies (lead capture) — dormant until a Freebie template is selected
+			'freebieTemplateNames'   => [],
+			'freebieRegisterTemplate'=> '',
+			'freebieRegisterPage'    => 0,
 
 			// Mail & Branding
 			'mailTemplatePath'       => '',
@@ -314,7 +319,42 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		$fsAssets->add($icons);
 
 		$inputfields->add($fsAssets);
-		
+
+		/* ---------- Freebies (lead capture) ---------- */
+		$fsFree = $this->modules->get('InputfieldFieldset');
+		$fsFree->label = 'Freebies (lead capture)';
+		$fsFree->name  = 'pl_freebies';
+		$fsFree->description = 'Optional. Free, registration-gated content (lead magnets). Leave the templates empty to keep it disabled — no freebie fields/role are created until a Freebie template is selected here.';
+		$fsFree->collapsed = Inputfield::collapsedBlank;
+
+		$ft = $this->modules->get('InputfieldAsmSelect');
+		$ft->name        = 'freebieTemplateNames';
+		$ft->label       = 'Freebie templates';
+		$ft->description = 'Templates whose pages can be marked as freebies. Adds the "plf_freebie" checkbox to these templates; pages with that box checked are listed/gated as freebies.';
+		foreach ($this->wire('templates') as $t) { if ($t->flags & Template::flagSystem) continue; $ft->addOption($t->name, $t->name); }
+		$ft->value = (array) $this->get('freebieTemplateNames');
+		$fsFree->add($ft);
+
+		$rt = $this->modules->get('InputfieldSelect');
+		$rt->name        = 'freebieRegisterTemplate';
+		$rt->label       = 'Per-freebie register template';
+		$rt->description = 'Optional. If a freebie page has a child using this template, guests are redirected there to register. On save the module ensures its fields on this template (plf_intro, plf_form_button, plf_redirect, plf_success, plf_mail_*).';
+		$rt->columnWidth = 50;
+		$rt->addOption('', '—');
+		foreach ($this->wire('templates') as $t) { if ($t->flags & Template::flagSystem) continue; $rt->addOption($t->name, $t->name); }
+		$rt->value = (string) $this->get('freebieRegisterTemplate');
+		$fsFree->add($rt);
+
+		$rp = $this->modules->get('InputfieldPageListSelect');
+		$rp->name        = 'freebieRegisterPage';
+		$rp->label       = 'Global register page (fallback)';
+		$rp->description = 'Optional. A single page hosting the registration form, used when a freebie has no per-freebie register child.';
+		$rp->columnWidth = 50;
+		$rp->value       = (int) $this->get('freebieRegisterPage');
+		$fsFree->add($rp);
+
+		$inputfields->add($fsFree);
+
 		/** -----------------------
 		 *  Sync (advanced) UI
 		 *  ----------------------*/

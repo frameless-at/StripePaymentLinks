@@ -300,6 +300,17 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			$this->wire('log')->save(self::LOG_MAIL, 'layout.html.php missing in module (includes/mail); using minimal HTML fallback.');
 		}
 
+		// Freebies (lead-capture) live in core but stay DORMANT until configured.
+		// Register their hooks (each self-gates) + config-gated provisioning: the
+		// freebie fields/role are created only when Freebie templates are configured.
+		$this->freebies()->initHooks();
+		$this->addHookAfter('Modules::saveConfig', function(\ProcessWire\HookEvent $e) {
+			$class = $e->arguments(0);
+			$class = is_object($class) ? $class->className() : (string) $class;
+			if ($class !== $this->className()) return;
+			$this->freebies()->provision((array) $e->arguments(1));
+		});
+
 		// Inject Bootstrap (CSS/JS) early into <head> to avoid FOUC
 		$this->addHookAfter('Page::render', function(\ProcessWire\HookEvent $e) {
 			$html = (string)$e->return;
@@ -1253,6 +1264,30 @@ public function processCheckout(Page $currentPage): void {
 		if (!$this->withdrawalService) { require_once __DIR__ . '/includes/PLWithdrawalService.php'; $this->withdrawalService = new PLWithdrawalService($this); }
 		return $this->withdrawalService;
 	}
+
+	/**
+	 * Returns the lazily-loaded PLFreebies service (lead-capture / freebies).
+	 * The feature is integrated into core but dormant until Freebie templates are
+	 * configured. The methods below are the template-callable API (delegators).
+	 *
+	 * @return PLFreebies
+	 */
+	public function freebies(): PLFreebies {
+		if (!$this->freebiesService) { require_once __DIR__ . '/includes/PLFreebies.php'; $this->freebiesService = new PLFreebies($this); }
+		return $this->freebiesService;
+	}
+
+	/* ---- Freebies template API (delegates to the PLFreebies service) ---- */
+	public function renderFreebies(?User $user = null, array $opts = []): string { return $this->freebies()->renderFreebies($user, $opts); }
+	public function renderFreebieCards(?User $user = null, array $opts = []): string { return $this->freebies()->renderFreebieCards($user, $opts); }
+	public function renderRegisterForm(array $opts = []): string { return $this->freebies()->renderRegisterForm($opts); }
+	public function renderRegisterModal(array $opts = []): string { return $this->freebies()->renderRegisterModal($opts); }
+	public function requireFreebieAccess(Page $freebie, string $registerUrl = ''): void { $this->freebies()->requireFreebieAccess($freebie, $registerUrl); }
+	public function hasFreebieAccess(User $user, Page $freebie): bool { return $this->freebies()->hasFreebieAccess($user, $freebie); }
+	public function grantFreebie(User $user, Page $freebie): void { $this->freebies()->grantFreebie($user, $freebie); }
+	public function getFreebiesData(?User $user = null, array $opts = []): array { return $this->freebies()->getFreebiesData($user, $opts); }
+	public function findFreebies(): PageArray { return $this->freebies()->findFreebies(); }
+	public function resolveRegisterPage(?Page $freebie = null): ?Page { return $this->freebies()->resolveRegisterPage($freebie); }
 
 	/**
 	 * Renders the legally required "Vertrag widerrufen" footer link
