@@ -614,7 +614,9 @@ class PLFreebies extends Wire {
       'leadHtml'      => $bodyHtml,
       'productUrl'    => $magicUrl,
       'ctaText'       => $btn,
-      'closingText'   => $this->tLocal('mail.consent'),
+      // Consent line only for NEW signups (double opt-in). Existing members have
+      // already consented — don't ask them again; just the signature.
+      'closingText'   => $isNew ? $this->tLocal('mail.consent') : '',
       'signatureName' => $signature,
     ];
     if ($color !== '') {
