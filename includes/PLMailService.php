@@ -170,6 +170,102 @@ class PLMailService extends Wire {
 		}
 	}
 
+	/* =====================================================================
+	 * LOGIN LINK (passwordless magic link)
+	 * ===================================================================*/
+	/**
+	 * Send a passwordless login-link (magic link) email. Mirrors
+	 * sendPasswordResetMail(); the link points to <dest>?access=TOKEN, which
+	 * handleAccessParam() consumes for a soft-login.
+	 *
+	 * @param StripePaymentLinks $mod
+	 * @param User   $user
+	 * @param string $loginUrl
+	 * @return bool
+	 */
+	public function sendLoginLinkMail(StripePaymentLinks $mod, User $user, string $loginUrl): bool
+	{
+		$mail   = wire('mail');
+		$config = wire('config');
+
+		$vars = [
+			'preheader'     => $mod->t('mail.loginlink.preheader'),
+			'firstname'     => $this->displayName($user),
+			'productTitle'  => $mod->t('mail.loginlink.title'),
+			'productUrl'    => $loginUrl,
+			'ctaText'       => $mod->t('mail.loginlink.cta'),
+			'leadText'      => $mod->t('mail.loginlink.body'),
+			'footerNote'    => $mod->t('mail.common.footer_note'),
+			'brandColor'    => (string)($mod->brandColor ?? '#0d6efd'),
+			'logoUrl'       => (string)($mod->logoUrl ?? ''),
+			'fromName'      => (string)($mod->mailFromName ?? ($config->siteName ?? $config->httpHost ?? 'Website')),
+			'brandHeader'   => (string)($mod->mailHeaderName ?? ''),
+			'headerTagline' => $mod->t('mail.common.header_tagline'),
+			'closingText'   => $mod->t('mail.loginlink.notice'),
+		];
+
+		$html = $this->renderLayout($mod->mailLayoutPath(), $vars);
+
+		$m = $mail->new();
+		$m->to($user->email);
+		$m->from(
+			(string)($mod->mailFromEmail ?? ($config->adminEmail ?? 'no-reply@' . ($config->httpHost ?? 'localhost'))),
+			$vars['fromName']
+		);
+		$subjectPrefix = (string)($mod->subjectPrefix ?? '');
+		$subjectCore   = $mod->t('mail.loginlink.subject');
+		$m->subject($subjectPrefix !== '' ? ($subjectPrefix . ' ' . $subjectCore) : $subjectCore);
+
+		$m->bodyHTML($html);
+		$m->body($vars['leadText'] . "\n\n" . $loginUrl);
+		$this->applyDeliverabilityHeaders($m, $mod);
+
+		try {
+			$sent = (bool)$m->send();
+			if ($sent) {
+				$mod->wire('log')->save('mail', '[OK] Login link email successfully sent to ' . $user->email);
+			}
+			return $sent;
+		} catch (\Throwable $e) {
+			$mod->wire('log')->save('mail', '[ERROR] Login link email send error: ' . $e->getMessage());
+			return false;
+		}
+	}
+
+	/**
+	 * Public convenience around the shared branded layout: fills brand defaults
+	 * from the module and derives the plain-text part, then delegates to the
+	 * private sendBrandedMail(). Lets add-ons (e.g. StripePlFreebies) reuse the
+	 * exact same look as the SPL mails by passing only content vars
+	 * (headline/leadHtml/leadText, productUrl, ctaText, closingText,
+	 * signatureName, productTitle, preheader).
+	 *
+	 * @param StripePaymentLinks $mod
+	 * @param string $to
+	 * @param string $subject
+	 * @param array  $vars
+	 * @return bool
+	 */
+	public function sendLayoutMail(StripePaymentLinks $mod, string $to, string $subject, array $vars): bool
+	{
+		$config = wire('config');
+
+		// Brand defaults — only for keys the caller did not set.
+		$vars += [
+			'brandColor'    => (string)($mod->brandColor ?? '#0d6efd'),
+			'logoUrl'       => (string)($mod->logoUrl ?? ''),
+			'fromName'      => (string)($mod->mailFromName ?? ($config->siteName ?? $config->httpHost ?? 'Website')),
+			'brandHeader'   => (string)($mod->mailHeaderName ?? ''),
+			'headerTagline' => $mod->t('mail.common.header_tagline'),
+			'footerNote'    => $mod->t('mail.common.footer_note'),
+		];
+
+		$plainSrc = (string)($vars['leadText'] ?? ($vars['leadHtml'] ?? ''));
+		$plain    = trim($this->plainTextFromMaybeHtml($plainSrc) . "\n\n" . (string)($vars['productUrl'] ?? ''));
+
+		return $this->sendBrandedMail($mod, $to, $subject, $vars, $plain, 'Layout mail');
+	}
+
 	/** Hookable: last-chance override of mail variables */
 	protected function ___alterAccessMailVars(array $vars, StripePaymentLinks $mod, User $user, array $links): array{
 		return $vars;

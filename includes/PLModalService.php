@@ -72,6 +72,28 @@ final class PLModalService
 	}
 
 	/**
+	 * Queue a "no access" notice for logged-in users who lack access to a gated
+	 * product (no purchase/grant). Shown instead of the login-required modal,
+	 * which would be misleading for an already signed-in user.
+	 */
+	public function queueNoAccessModal(): void
+	{
+		$s = $this->mod->wire('session');
+
+		$titleEsc = htmlspecialchars($this->mod->t('modal.noaccess.title'), ENT_QUOTES, 'UTF-8');
+		$bodyHtml = $this->fillPlaceholders($this->mod->t('modal.noaccess.body'), null);
+
+		$btnClose = htmlspecialchars($this->mod->t('modal.notice.close'), ENT_QUOTES, 'UTF-8');
+
+		$s->set('modal_notice', [
+			'id'     => 'noAccessModal',
+			'title'  => $titleEsc,
+			'body'   => $bodyHtml,
+			'footer' => '<button class="btn btn-primary" data-bs-dismiss="modal" type="button">'.$btnClose.'</button>',
+		]);
+	}
+
+	/**
 	 * Queue "already purchased" notice modal.
 	 */
 	public function queueAlreadyPurchasedModal(): void
@@ -264,7 +286,8 @@ final class PLModalService
 		$intro  = $this->mod->t('modal.login.body');
 		$btn    = $this->mod->t('modal.login.submit');
 		$cancel = $this->mod->t('modal.notice.cancel');
-		$forgot = $this->mod->t('modal.login.forgot_link');
+		$forgot    = $this->mod->t('modal.login.forgot_link');
+		$forgotTip = $this->mod->t('modal.login.forgot_tooltip');
 
 		$modal = [
 			'id'    => 'loginModal',
@@ -277,7 +300,10 @@ final class PLModalService
 					['type'=>'email','name'=>'email','label'=>$this->mod->t('modal.common.label_email'),'attrs'=>['required'=>true,'autocomplete'=>'username']],
 					['type'=>'password','name'=>'password','label'=>$this->mod->t('modal.common.label_password'),'attrs'=>['required'=>true,'autocomplete'=>'current-password']],
 				],
-				'afterFieldsHtml' => '<a href="#" data-bs-toggle="modal" data-bs-target="#resetRequestModal" data-bs-dismiss="modal">'.$h($forgot).'</a>',
+				'afterFieldsHtml' =>
+					'<div><a href="#" data-bs-toggle="modal" data-bs-target="#resetRequestModal" data-bs-dismiss="modal">'.$h($forgot).'</a>'
+					.' <i class="bi bi-info-circle text-muted ms-1" style="cursor:help" data-bs-toggle="tooltip" title="'.$h($forgotTip).'"></i></div>'
+					.$this->mod->loginModalLinks(),
 				'submitText' => $btn,
 				'cancelText' => $cancel,
 			],
@@ -309,6 +335,37 @@ final class PLModalService
 			'form'  => [
 				'action'     => (string) $opts['action'],
 				'op'         => 'reset_request',
+				'fields'     => [
+					['type'=>'email','name'=>'email','label'=>$this->mod->t('modal.common.label_email'),'attrs'=>['required'=>true,'autocomplete'=>'username']],
+					['type'=>'hidden','name'=>'return_url','value'=> (string)($opts['return_url'] ?? '')],
+				],
+				'cancelText' => $cancel,
+				'submitText' => $btn,
+				'bodyIntro'  => $this->fillPlaceholders($body, null),
+			],
+		]);
+	}
+
+	/**
+	 * Render the passwordless login-link request modal (mirrors modalResetRequest).
+	 * Posts op=login_link; the user receives a magic link (?access=TOKEN).
+	 *
+	 * @param array $opts Options including 'action' and 'return_url'.
+	 * @return string Rendered modal HTML.
+	 */
+	public function modalLoginLink(array $opts): string
+	{
+		$title  = $this->mod->t('modal.loginlink.title');
+		$body   = $this->mod->t('modal.loginlink.body');
+		$btn    = $this->mod->t('modal.loginlink.submit');
+		$cancel = $this->mod->t('modal.notice.cancel');
+
+		return $this->renderModal([
+			'id'    => 'loginLinkModal',
+			'title' => htmlspecialchars($title, ENT_QUOTES, 'UTF-8'),
+			'form'  => [
+				'action'     => (string) $opts['action'],
+				'op'         => 'login_link',
 				'fields'     => [
 					['type'=>'email','name'=>'email','label'=>$this->mod->t('modal.common.label_email'),'attrs'=>['required'=>true,'autocomplete'=>'username']],
 					['type'=>'hidden','name'=>'return_url','value'=> (string)($opts['return_url'] ?? '')],
@@ -463,8 +520,8 @@ document.addEventListener('submit', async (ev) => {
 	  }
 	}
 
-	if (op === 'reset_request') {
-	  setTimeout(()=> modal?.hide(), 800);
+	if (op === 'reset_request' || op === 'login_link' || op === 'freebie_register') {
+	  setTimeout(()=> modal?.hide(), 1600);
 	} else if (op === 'reset_password' || op === 'set_password') {
 	  setTimeout(()=> window.location.href = window.location.pathname, 600);
 	}

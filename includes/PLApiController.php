@@ -382,6 +382,46 @@ final class PLApiController {
 	  return;
 	}
 
+	// --------------- LOGIN LINK (passwordless) ---------------
+	if ($op === 'login_link') {
+	  $email = trim((string)$input->post->email);
+	  $okMsg = $this->mod->t('api.loginlink.ok_generic');
+	  // Destination of the magic link: prefer the originally intended URL
+	  // (e.g. /account/), fall back to the posted return_url, then home.
+	  $returnUrl = (string) ($session->get('pl_intended_url')
+		?: ($sanitizer->url($input->post->return_url) ?: $pages->get('/')->httpUrl));
+	  try {
+		$ru = parse_url($returnUrl);
+		if (!empty($ru['host']) && isset($config->httpHost) && $ru['host'] !== $config->httpHost) {
+		  $returnUrl = $pages->get('/')->httpUrl;
+		}
+	  } catch (\Throwable $e) {
+		$returnUrl = $pages->get('/')->httpUrl;
+	  }
+	  if ($email) {
+		$u = $users->get("email=" . $sanitizer->email($email));
+		if ($u && $u->id) {
+		  if (!$u->hasField('access_token') || !$u->hasField('access_expires')) {
+			$event->return = $json(['ok' => false, 'error' => $this->mod->t('api.loginlink.not_config')]);
+			return;
+		  }
+		  $token = bin2hex(random_bytes(32));
+		  $u->of(false);
+		  $u->access_token   = $token;
+		  $u->access_expires = time() + 3600; // 1h TTL
+		  $users->save($u);
+		  $glue     = (strpos($returnUrl, '?') === false) ? '?' : '&';
+		  $loginUrl = $returnUrl . $glue . 'access=' . urlencode($token);
+		  $sent = $this->mod->mail()->sendLoginLinkMail($this->mod, $u, $loginUrl);
+		  if (!$sent) {
+			$this->mod->wire('log')->save('mail', '[WARN] login_link: sendLoginLinkMail returned false {"user":'.$u->id.'}');
+		  }
+		}
+	  }
+	  $event->return = $json(['ok' => true, 'msg' => $okMsg]);
+	  return;
+	}
+
 	// ---------------- RESET PASSWORD -----------------
 	if ($op === 'reset_password') {
 	  $token = $input->post->text('token');

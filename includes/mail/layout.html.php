@@ -130,6 +130,9 @@ $showInfo = $has('extraCtas') || $has('closingText') || $has('signatureName');
 				<p><?= nl2br($esc($__para)) ?></p>
 			  <?php endforeach; ?>
 			  <?php endif; ?>
+			  <?php if ($has('leadHtml')): // raw HTML body (e.g. rich-text CMS field) ?>
+			  <div><?= $val('leadHtml') ?></div>
+			  <?php endif; ?>
 			</td>
 		  </tr>
 

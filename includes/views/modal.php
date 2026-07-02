@@ -25,7 +25,7 @@ $attr = static function(array $kv) use ($e): string {
 };
 
 $renderField = static function(array $f) use ($e, $modalId): string {
-  $f = array_merge(['type'=>'text','name'=>'','label'=>'','value'=>'','attrs'=>[]], $f);
+  $f = array_merge(['type'=>'text','name'=>'','label'=>'','value'=>'','attrs'=>[],'inputClass'=>'form-control','help'=>''], $f);
   $base = $f['name'] !== '' ? preg_replace('/[^a-z0-9_-]+/i','',(string)$f['name']) : ('fld-'.uniqid());
   $id   = $f['attrs']['id'] ?? ($modalId . '-' . $base);
 
@@ -43,10 +43,14 @@ $renderField = static function(array $f) use ($e, $modalId): string {
 
   $label   = $f['label'] !== '' ? '<label class="form-label" for="'.$e($id).'">'.$e($f['label']).'</label>' : '';
   $valAttr = ($f['type'] === 'password') ? '' : ' value="'.$e($f['value']).'"';
+  $helpId  = $id . '-help';
+  $help    = $f['help'] !== '' ? '<div id="'.$e($helpId).'" class="form-text">'.$e($f['help']).'</div>' : '';
+  $descAttr= $f['help'] !== '' ? ' aria-describedby="'.$e($helpId).'"' : '';
 
   return '<div class="mb-3">'.$label
-	   . '<input id="'.$e($id).'" type="'.$e($f['type']).'" class="form-control" name="'.$e($f['name']).'"'
-	   . $valAttr . $attrs . '>'
+	   . '<input id="'.$e($id).'" type="'.$e($f['type']).'" class="'.$e($f['inputClass']).'" name="'.$e($f['name']).'"'
+	   . $valAttr . $attrs . $descAttr . '>'
+	   . $help
 	   . '</div>';
 };
 ?>

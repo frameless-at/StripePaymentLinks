@@ -99,23 +99,39 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		'mail.resetpwd.title'        => $this->_('Reset password'),
 		'mail.resetpwd.notice' 		 => $this->_('If you did not request a password reset, just ignore this email.'),
 
+		'mail.loginlink.subject'     => $this->_('Your login link'),
+		'mail.loginlink.preheader'   => $this->_('Click the button to sign in. The link is time-limited.'),
+		'mail.loginlink.body'        => $this->_('Click the button below to sign in to your account. No password needed — the link is time-limited.'),
+		'mail.loginlink.cta'         => $this->_('Sign in'),
+		'mail.loginlink.title'       => $this->_('Sign in'),
+		'mail.loginlink.notice'      => $this->_('If you did not request this link, just ignore this email.'),
+
 		// ===== MODAL: notices =====
 		'modal.loginrequired.title'  => $this->_('Sign in'),
 		'modal.loginrequired.body'   => $this->_('Please sign in to open this online product.'),
+		'modal.noaccess.title'       => $this->_('No access'),
+		'modal.noaccess.body'        => $this->_('This product isn’t part of your purchases. You can get access to it here.'),
 		'modal.expiredaccess.title'  => $this->_('Link expired'),
-		'modal.expiredaccess.body'   => $this->_('Your access link is invalid or expired. Please sign in or request a new password-reset link.'),
+		'modal.expiredaccess.body'   => $this->_('This access link is invalid or expired. Please sign in — you can also have a new login link emailed to you there.'),
 
 		// ===== MODAL: login =====
 		'modal.login.title'          => $this->_('I already have access'),
 		'modal.login.body'           => $this->_(''),
 		'modal.login.submit'         => $this->_('Sign in'),
 		'modal.login.forgot_link'    => $this->_('Forgot password?'),
+		'modal.login.forgot_tooltip' => $this->_('Already have a password but forgot it? We’ll email you a link to set a new one. Use the same email address you bought or registered with.'),
 		'modal.login.open'           => $this->_('Sign in'),
 
 		// ===== MODAL: request reset =====
 		'modal.resetreq.title'       => $this->_('Reset password'),
 		'modal.resetreq.body'        => $this->_('Enter your email — we’ll send you a link.'),
 		'modal.resetreq.submit'      => $this->_('Send link'),
+
+		// Passwordless login link
+		'modal.login.magiclink_link' => $this->_('Sign in with a link instead'),
+		'modal.loginlink.title'      => $this->_('Sign in with a link'),
+		'modal.loginlink.body'       => $this->_('Enter your email — we’ll send you a link to sign in without a password.'),
+		'modal.loginlink.submit'     => $this->_('Send login link'),
 
 		// ===== MODAL: reset =====
 		'modal.resetexpired.title'   => $this->_('Reset link expired'),
@@ -166,6 +182,8 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 
 		'api.resetreq.ok_generic'   => $this->_('If the email exists, a link has been sent.'),
 		'api.resetreq.not_config'   => $this->_('Password reset is not configured on the server (fields missing).'),
+		'api.loginlink.ok_generic'  => $this->_('If the email exists, a login link has been sent.'),
+		'api.loginlink.not_config'  => $this->_('Passwordless login is not configured on the server (fields missing).'),
 
 		'api.resetpwd.token_missing'=> $this->_('Token missing.'),
 		'api.resetpwd.token_invalid'=> $this->_('Token invalid or expired.'),
@@ -636,7 +654,14 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 				$sales = $currentPage->parent();
 				if ($sales && $sales->id) {
 					$session->set('pl_intended_url', $currentPage->httpUrl);
-					$this->modal()->queueLoginRequiredModal();
+					// A logged-in user lacks the purchase/grant, not a login → showing
+					// "please sign in" would be misleading. Guests get the login modal,
+					// signed-in users a dedicated "no access" notice.
+					if ($u->isLoggedin()) {
+						$this->modal()->queueNoAccessModal();
+					} else {
+						$this->modal()->queueLoginRequiredModal();
+					}
 					$session->redirect($sales->httpUrl, false);
 					return '';
 				}
@@ -685,7 +710,18 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			'action'     => $this->apiUrl(),
 			'return_url' => $currentPage->httpUrl,
 		]);
-	
+
+		$out .= $this->modal()->modalLoginLink([
+			'action'     => $this->apiUrl(),
+			'return_url' => $currentPage->httpUrl,
+		]);
+
+		// Initialise the Bootstrap tooltips (info icons) inside the login modal.
+		$out .= '<script>document.addEventListener("DOMContentLoaded",function(){
+			if(!window.bootstrap) return;
+			document.querySelectorAll("#loginModal [data-bs-toggle=\'tooltip\']").forEach(function(el){ bootstrap.Tooltip.getOrCreateInstance(el); });
+		});</script>';
+
 		// Render "set new password" modal only when the token is valid
 		if ($shouldOpenReset) {
 			$out .= $this->modal()->modalResetSet([
@@ -704,10 +740,12 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			</script>';
 		}
 	
-		// 5) After purchase: force set-password modal when needed (on access pages)
-		if ($isAccessPage
-			&& $u->isLoggedin()
-			&& $u->hasField('must_set_password') && $u->must_set_password) {
+		// 5) Force the set-password modal when a logged-in user still must set a
+		//    password. WHERE this fires is hookable (default: gated product pages;
+		//    add-ons extend it to /account and freebie pages).
+		if ($u->isLoggedin()
+			&& $u->hasField('must_set_password') && $u->must_set_password
+			&& $this->promptSetPasswordOnPage($currentPage)) {
 	
 			$out .= $this->modal()->modalSetPassword([
 				'action'   => $this->apiUrl(),
@@ -1073,6 +1111,33 @@ public function processCheckout(Page $currentPage): void {
 			$session->forceLogin($u);
 			$this->wire('log')->save(self::LOG_SEC, 'Soft-login via valid access token '.$u->id);
 		}
+	}
+
+	/**
+	 * Hookable slot for extra links in the login modal (after "forgot password").
+	 * Default: none. Integrators (e.g. StripePlCustomerPortal) attach via
+	 * addHookAfter('StripePaymentLinks::loginModalLinks') and append their own
+	 * links (magic-link login, register, …). Keeps modalLogin generic.
+	 *
+	 * @return string
+	 */
+	public function ___loginModalLinks(): string {
+		return '';
+	}
+
+	/**
+	 * Hookable: should the "set your password" modal be prompted on this page for
+	 * a logged-in user whose must_set_password is set? Default: only on gated
+	 * product pages (requires_access). Integrators attach via
+	 * addHookAfter('StripePaymentLinks::promptSetPasswordOnPage') to extend it to
+	 * their pages (e.g. StripePlCustomerPortal → /account, StripePlFreebies →
+	 * freebie pages), so members who arrived via a magic link get reminded there.
+	 *
+	 * @param \ProcessWire\Page $page
+	 * @return bool
+	 */
+	public function ___promptSetPasswordOnPage(\ProcessWire\Page $page): bool {
+		return $this->productRequiresAccess($page);
 	}
 
 	/* ========================= Text access ========================= */
