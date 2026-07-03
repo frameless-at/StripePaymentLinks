@@ -115,6 +115,40 @@ The module is designed for small e-commerce or membership scenarios where a full
 
 ---
 
+## Template API
+
+Methods to call from your ProcessWire templates via
+`$modules->get('StripePaymentLinks')->…`.
+
+### Core
+
+- **`render(Page $page): string`** — the auth / withdrawal modals plus their inline
+  scripts. Echo it inside `<body>` (see Usage above). Needed on frontend pages.
+- **`renderWithdrawalLink(string $cssClass = '', string $label = ''): string`** — a
+  link that opens the right-of-withdrawal ("withdraw contract") modal.
+
+### Freebies (lead capture)
+
+Dormant until you select Freebie templates (see Configuration). Gating is automatic
+for pages flagged `plf_freebie` — no call needed.
+
+- **`renderRegisterForm(array $opts = []): string`** — the inline registration form;
+  put it on your register page's template.
+- **`renderFreebies(?User $user = null, array $opts = []): string`** — a grid of all
+  freebies (a member has access to all of them); use it for a "my freebies" page.
+- **`hasFreebieAccess(User $user, Page $freebie): bool`** — check access, e.g. to
+  show or hide content.
+- **`getFreebiesData(?User $user = null, array $opts = []): array`** — structured
+  freebie data if you want to build your own markup.
+- **`grantFreebie(User $user, Page $freebie): void`** — grant access manually.
+
+Rarely needed (handled automatically): `requireFreebieAccess()` (the `plf_freebie`
+auto-gate already does this), `renderRegisterModal()` (auto-injected where offered),
+`renderFreebieCards()` (cards without the grid wrapper), `findFreebies()`,
+`resolveRegisterPage()`.
+
+---
+
 ## Stripe Webhook & Subscription Handling
 
 The module supports **real-time synchronization** between Stripe subscriptions and ProcessWire user access.
