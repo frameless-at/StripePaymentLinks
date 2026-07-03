@@ -290,6 +290,22 @@ class PLFreebies extends Wire {
     $home = $this->wire('pages')->get('/')->httpUrl;
     $dest = $registerUrl ?: ($this->resolveRegisterUrl($freebie) ?: $home);
     if (rtrim($dest, '/') === rtrim($freebie->httpUrl, '/')) $dest = $home;
+
+    // Diagnostic: gating a GUEST is normal, gating a LOGGED-IN user is the case worth
+    // auditing. Logs the exact decision context so an intermittent "logged in but sent
+    // to register" report can be verified from the log instead of guessed. member=1 (or
+    // free_access containing the freebie) here would be a real bug; member=0 with an
+    // empty grant is correct behaviour. Channel: freebie-gate.
+    if ($user->isLoggedin()) {
+      $this->mod->wire('log')->save('freebie-gate', sprintf(
+        'gated logged-in user=%d(%s) super=%d member=%d free_access=[%s] freebie=%d(%s) dest=%s',
+        $user->id, $user->name,
+        $user->isSuperuser() ? 1 : 0,
+        $user->hasRole('member') ? 1 : 0,
+        $user->hasField('plf_free_access') ? implode(',', $user->plf_free_access->each('id')) : 'nofield',
+        $freebie->id, $freebie->name, $dest
+      ));
+    }
     $session->redirect($dest, false);
   }
 
