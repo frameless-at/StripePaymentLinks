@@ -123,12 +123,13 @@ The module is designed for small e-commerce or membership scenarios where a full
    > visible modal markup where it doesn’t belong (the head is for metadata). Keep it in
    > the `<body>`.
    >
-   > **Where in the body matters**, because `render()` also runs its side effects (checkout
-   > processing, access-param **login**, gating redirects) *at the point you call it*. If your
-   > header/nav reflects the login state (e.g. `StripePlCustomerPortal::renderLoginLink()`),
-   > echo it near the **top of `<body>`, before the header**, so the state is up to date after
-   > a checkout or magic-link click. If nothing above depends on the login state, just before
-   > `</body>` is the convention.
+   > A nav login link (`StripePlCustomerPortal::renderLoginLink()`) reflects the **session**,
+   > which is set at the start of every request — so it shows the correct state no matter where
+   > you echo `render()`. Echoing it at the **bottom of the body, just before `</body>`**, is
+   > the normal setup and works fine. (The only exception is the single request where
+   > `render()` itself logs the user in — a Stripe checkout return or a magic-link click: on
+   > that page a header rendered *before* the call shows the pre-login state until the next
+   > navigation. Reorder only if that one-request delay matters.)
    >
    > Bootstrap, if enabled, is auto-injected into `<head>` by a hook.
 
