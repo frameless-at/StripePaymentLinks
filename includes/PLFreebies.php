@@ -280,7 +280,25 @@ class PLFreebies extends Wire {
       $user = $this->wire('user'); // forceLogin changed the current user
     }
 
-    if ($this->hasFreebieAccess($user, $freebie)) return;
+    $access = $this->hasFreebieAccess($user, $freebie);
+
+    // Diagnostic (freebie-gate channel): log the gate DECISION for every LOGGED-IN user
+    // hitting a freebie, so an intermittent "logged in but sent to register" report can be
+    // pinned down. GRANTED = the server let them in (a redirect the user still saw was then
+    // a client/CDN cache); GATED member=1 (or a matching grant) = a real access bug; GATED
+    // member=0 with no grant = correct. Seeing a redirect but NO log line at all ⇒ the
+    // request never reached the server (full-page/proxy cache).
+    if ($user->isLoggedin()) {
+      $this->wire('log')->save('freebie-gate', sprintf(
+        '%s user=%d(%s) super=%d member=%d free_access=[%s] freebie=%d(%s)',
+        $access ? 'GRANTED' : 'GATED',
+        $user->id, $user->name, $user->isSuperuser() ? 1 : 0, $user->hasRole('member') ? 1 : 0,
+        $user->hasField('plf_free_access') ? implode(',', $user->plf_free_access->each('id')) : 'nofield',
+        $freebie->id, $freebie->name
+      ));
+    }
+
+    if ($access) return;
 
     $session = $this->wire('session');
     $session->set('pl_intended_url', $freebie->httpUrl);          // target after magic link
@@ -290,22 +308,6 @@ class PLFreebies extends Wire {
     $home = $this->wire('pages')->get('/')->httpUrl;
     $dest = $registerUrl ?: ($this->resolveRegisterUrl($freebie) ?: $home);
     if (rtrim($dest, '/') === rtrim($freebie->httpUrl, '/')) $dest = $home;
-
-    // Diagnostic: gating a GUEST is normal, gating a LOGGED-IN user is the case worth
-    // auditing. Logs the exact decision context so an intermittent "logged in but sent
-    // to register" report can be verified from the log instead of guessed. member=1 (or
-    // free_access containing the freebie) here would be a real bug; member=0 with an
-    // empty grant is correct behaviour. Channel: freebie-gate.
-    if ($user->isLoggedin()) {
-      $this->mod->wire('log')->save('freebie-gate', sprintf(
-        'gated logged-in user=%d(%s) super=%d member=%d free_access=[%s] freebie=%d(%s) dest=%s',
-        $user->id, $user->name,
-        $user->isSuperuser() ? 1 : 0,
-        $user->hasRole('member') ? 1 : 0,
-        $user->hasField('plf_free_access') ? implode(',', $user->plf_free_access->each('id')) : 'nofield',
-        $freebie->id, $freebie->name, $dest
-      ));
-    }
     $session->redirect($dest, false);
   }
 
