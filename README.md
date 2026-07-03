@@ -126,10 +126,7 @@ The module is designed for small e-commerce or membership scenarios where a full
    > A nav login link (`StripePlCustomerPortal::renderLoginLink()`) reflects the **session**,
    > which is set at the start of every request — so it shows the correct state no matter where
    > you echo `render()`. Echoing it at the **bottom of the body, just before `</body>`**, is
-   > the normal setup and works fine. (The only exception is the single request where
-   > `render()` itself logs the user in — a Stripe checkout return or a magic-link click: on
-   > that page a header rendered *before* the call shows the pre-login state until the next
-   > navigation. Reorder only if that one-request delay matters.)
+   > the normal setup and works fine.
    >
    > Bootstrap, if enabled, is auto-injected into `<head>` by a hook.
 
