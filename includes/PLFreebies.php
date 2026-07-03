@@ -798,11 +798,12 @@ class PLFreebies extends Wire {
       $f->type        = $this->wire("modules")->get('FieldtypeCheckbox');
       $f->name        = $name;
       $f->label       = $label;
-      $f->description = $this->_('Mark this page as a free, registration-gated freebie.');
       $f->columnWidth = 20;
       $fields->save($f);
-    } elseif ((string) $f->label !== $label) {
-      $f->label = $label; // self-heal the label
+    } elseif ((string) $f->label !== $label || (string) $f->description !== '') {
+      // Render like the other product checkboxes: label only, no description header.
+      $f->label       = $label;
+      $f->description = '';
       $fields->save($f);
     }
 
