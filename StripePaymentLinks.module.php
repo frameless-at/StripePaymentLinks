@@ -300,6 +300,23 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			$this->wire('log')->save(self::LOG_MAIL, 'layout.html.php missing in module (includes/mail); using minimal HTML fallback.');
 		}
 
+		// Consume login tokens EARLY — in a Page::render BEFORE hook, so the login is
+		// established before the page (and its header/nav) renders. Fixes the stale header
+		// on the very request where the login happens: a Stripe checkout return
+		// (?session_id → processCheckout) or a magic-link click (?access → handleAccessParam).
+		// render() calls both too, but at its bottom-of-body position that is too late for a
+		// header login link. Both are idempotent (no-op without a token / already processed),
+		// so render()'s later calls stay safe. Registered before the freebie hooks so the
+		// login is in place before any gating check runs.
+		$this->addHookBefore('Page::render', function(\ProcessWire\HookEvent $e) {
+			$page = $e->object;
+			if (!($page instanceof \ProcessWire\Page) || !$page->id) return;
+			if ($page->id !== (int) $this->wire('page')->id) return;        // main requested page only
+			if ($page->template && $page->template->name === 'admin') return;
+			$this->processCheckout($page);
+			$this->handleAccessParam();
+		});
+
 		// Freebies (lead-capture) live in core but stay DORMANT until configured.
 		// Config-gated provisioning: the freebie fields/role are created only per
 		// config. (The freebie hooks themselves are registered LAST, see below.)
