@@ -6,7 +6,8 @@ It takes care of:
 - Handling the **Stripe redirect (success URL)**  
 - Creating or updating the **user account**  
 - Recording **purchases** in a repeater field  
-- Issuing **access links** for products that require login**  
+- Issuing **access links** for products that require login  
+- Offering **freebies** (free, registration-gated content) as lead magnets  
 - Sending **branded access mails**  
 - Rendering **Bootstrap modals** for login, reset, and set-password flows  
 
@@ -18,7 +19,7 @@ The module is designed for small e-commerce or membership scenarios where a full
 
 - **Checkout processing**  
   - Works with Stripe Checkout `session_id`  
-  - Records all purchased items in a single repeater item (`purchases`)  
+  - Records all purchased items in a single repeater item (`spl_purchases`)  
   - Stores session meta including `line_items` for debugging/audit  
 
 - **User handling**  
@@ -30,6 +31,16 @@ The module is designed for small e-commerce or membership scenarios where a full
   - Products with `requires_access=1` are protected  
   - Delivery pages auto-gate users without purchase  
   - Access links with optional magic token for new users  
+
+- **Freebies (lead capture)** — *dormant until configured*  
+  - Free, registration-gated content (lead magnets), no purchase required  
+  - Pages auto-gate via a `plf_freebie` checkbox (the free counterpart of `requires_access`)  
+  - Self-signup creates a `member` user + a passwordless access link (double opt-in)  
+  - Optional listing/grid; integrates into the `/account/` hub when StripePlCustomerPortal is installed  
+
+- **Login procedure**  
+  - Password login + optional **passwordless login link** ("email me a login link")  
+  - Optional **password reset** and **registration** links — chosen with three config checkboxes  
 
 - **Mail & branding**
   - Branded HTML mail layout (logo, color, signature, tagline)
@@ -44,11 +55,13 @@ The module is designed for small e-commerce or membership scenarios where a full
   - Test mode (dry-run) before actual sending
 
 - **Modals (Bootstrap)**  
-  - Login  
+  - Login (password)  
+  - Passwordless login link ("email me a login link")  
   - Request password reset  
   - Set new password (via token)  
   - Force password set after purchase  
-  - Notices (expired access, already purchased, reset expired)  
+  - Register (freebie / member signup)  
+  - Notices (expired access, no access, already purchased, reset expired)  
 
 - **Synchronization (Sync Helper)**  
   - Admin helper to **synchronize Stripe Checkout sessions** into ProcessWire users  
@@ -69,7 +82,7 @@ The module is designed for small e-commerce or membership scenarios where a full
 - ProcessWire 3.0.200+  
 - PHP 8.1+  
 - Stripe PHP SDK (installed in `StripePaymentLinks/vendor/stripe-php/`)  
-- Repeater field `purchases` on `user` template (created automatically on install)  
+- Repeater field `spl_purchases` on `user` template (created automatically on install)  
 
 ---
 
@@ -146,6 +159,60 @@ Rarely needed (handled automatically): `requireFreebieAccess()` (the `plf_freebi
 auto-gate already does this), `renderRegisterModal()` (auto-injected where offered),
 `renderFreebieCards()` (cards without the grid wrapper), `findFreebies()`,
 `resolveRegisterPage()`.
+
+---
+
+## Freebies (lead capture)
+
+Freebies are **free, registration-gated content** (lead magnets): the visitor pays
+with their email, not money. The feature ships with the module but stays **dormant**
+until you select at least one Freebie template in the config.
+
+**How it works**
+
+1. Mark a page as a freebie with the `plf_freebie` checkbox (added to the templates you
+   configure). The page is then **auto-gated** — no template code needed, exactly like
+   `requires_access` for paid products.
+2. A guest hitting a gated freebie is sent to your register form (or a register modal)
+   and signs up with name + email → a `member` user is created and a **passwordless
+   access link** is emailed (double opt-in).
+3. Clicking the link logs the user in and lands them on the freebie. Members have access
+   to **all** freebies.
+
+**Configuration** (module config → *Freebies (lead capture)*)
+
+- **Freebie templates** — templates whose pages can be marked as freebies (adds the
+  `plf_freebie` checkbox to them). *Leave empty to keep the whole feature disabled.*
+- **Per-freebie register template** — optional; if a freebie page has a child on this
+  template, guests are redirected there to register. On save the module provisions the
+  needed fields on it (`plf_intro`, `plf_form_button`, `plf_redirect`, `plf_success`,
+  `plf_mail_subject`, `plf_mail_greeting`, `plf_mail_body`, `plf_mail_button`).
+- **Global register page** — optional fallback register page.
+
+With no register page configured the module redirects to the home page and auto-opens
+the register **modal** instead.
+
+Registration works standalone. A central "my area" listing all freebies is only needed
+if you install **StripePlCustomerPortal**, which then shows freebie cards in `/account/`
+automatically. See the freebie methods under **Template API** above.
+
+---
+
+## Login procedure
+
+The login modal offers up to three auxiliary links below the password form, chosen with
+three checkboxes in the module config (*Login procedure*):
+
+- **Show password reset link** (default on) — the classic "Forgot password?".
+- **Show passwordless login link** — emails a one-time magic link that signs the user in
+  without a password (existing passwords keep working). With a customer area this usually
+  replaces the reset link.
+- **Show registration link** — opens the registration modal (requires the Freebies
+  feature to be configured).
+
+The login modal itself is emitted by `render()`. To open it from your own UI, link any
+element with `data-bs-toggle="modal" data-bs-target="#loginModal"` — or use
+`StripePlCustomerPortal::renderLoginLink()` for a ready-made, state-aware nav link.
 
 ---
 
@@ -242,7 +309,7 @@ Some customers purchase with different email addresses and end up with multiple 
 For advanced scenarios (e.g. when purchases were made outside the normal flow, or to backfill history), the module provides a **Sync Helper**:
 
 - Run via **module config** or CLI.  
-- Fetches Stripe Checkout Sessions via API and writes them into the `purchases` repeater.  
+- Fetches Stripe Checkout Sessions via API and writes them into the `spl_purchases` repeater.  
 - **Options**:  
   - **Dry Run** → simulate sync, only produce a report (no writes).  
   - **Update Existing** → overwrite already linked purchases.  
@@ -390,28 +457,39 @@ slot for the consumer-rights block. The module passes raw HTML in
 ## Configuration
 
 - **Stripe Secret API Key**
-- **Stripe Webhook Signing Secret** (optional, needed only for handloing subscriptions)
+- **Stripe Webhook Signing Secret** (optional, needed only for handling subscriptions)
 - **Product templates** (to enable `requires_access` / `allow_multiple_purchases` flags)
 - **Access mail policy** (`never`, `newUsersOnly`, `always`)
-- **Magic link TTL in minutes** (default TTL for access tokens)
+- **Access token TTL in minutes** (default TTL for access tokens)
+- **Login procedure** (show reset link / passwordless login link / registration link — see above)
+- **Freebies (lead capture)** (freebie templates, per-freebie register template, global register page — see above)
+- **Frontend assets** (auto-load Bootstrap 5 and Bootstrap Icons via CDN, with overridable CDN URLs)
 - **Mail branding** (logo, color, from name, signature, etc.)
+- **Right of withdrawal** (policy/terms pages, contact email, withdrawal + waiver texts)
 - **Sync options** (dry-run, update existing, create missing users, date range, email filter)
 - **Magic Links** (manual access link sending: product selection, TTL, recipients, test mode)
 
 ---
 
-## Optional: Bootstrap via CDN
+## Optional: Bootstrap & Bootstrap Icons via CDN
 
-The module’s modal dialogs and access UI are styled with **Bootstrap 5**.  
-If your site does not already include Bootstrap, you have two options:
+The module’s modals, access UI and `bi bi-*` icons are styled with **Bootstrap 5** and
+**Bootstrap Icons**. If your theme does not already include them, enable **“Auto-load
+Bootstrap via CDN if not present”** in the module config (*Frontend assets*).
 
-1. **Automatic inclusion (recommended for quick setup)**  
-   In the module configuration, enable **“Load Bootstrap 5 from CDN”**. The module will then insert css and js assets automatically into your frontend.
+When enabled, on frontend pages the module injects into `<head>` — **only if not already
+present**:
 
-This ensures the module’s modals, buttons, and notices render correctly, even if your site does not already use Bootstrap.
+- **Bootstrap CSS + JS** — skipped when a `bootstrap*.css` link is detected;
+- **Bootstrap Icons CSS** — checked **independently**, since a theme may ship Bootstrap
+  but not the icons font.
 
-2. **Manual inclusion**  
-   If your frontend already includes Bootstrap (from your theme or build pipeline), you can leave the config option disabled. No additional assets will be injected, avoiding duplicates.
+CDN URLs are overridable in the config. Leave the option disabled if your theme already
+provides Bootstrap and Bootstrap Icons, to avoid duplicates.
+
+> The modals are opened via `window.bootstrap`, so Bootstrap **JS** must be present. If
+> your theme loads only Bootstrap **CSS** (auto-load then skips both), add the Bootstrap
+> JS bundle yourself — otherwise modals won’t open.
 
 ---
 
