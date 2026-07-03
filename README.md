@@ -1,6 +1,6 @@
 # StripePaymentLinks
 
-Lightweight ProcessWire module to handle [Stripe Checkout Payment Links](https://stripe.com/docs/payments/checkout/payment-links).  
+Lightweight ProcessWire module to handle [Stripe Payment Links](https://docs.stripe.com/payment-links).  
 It takes care of:
 
 - Handling the **Stripe redirect (success URL)**  
@@ -116,10 +116,20 @@ The module is designed for small e-commerce or membership scenarios where a full
    echo $modules->get('StripePaymentLinks')->render($page);
    ```
 
-   > ⚠️ **Echo the return value inside `<body>`, conventionally just before `</body>`.**
-   > `render()` returns the global frontend chrome — the auth/withdrawal **modals plus their inline `<script>` blocks** (auto-open, tooltip init, global AJAX handler). Because it looks like a global/init call it is tempting to place it at the very top of a layout file (e.g. `_main.php`, before `<!DOCTYPE html>`), but there the modal markup and scripts end up **outside `<html>`**, producing invalid HTML and scripts the browser will not execute.
+   > ⚠️ **Echo the return value inside `<body>`.** `render()` returns the global frontend
+   > chrome — the auth/withdrawal **modals plus their inline `<script>` blocks** (auto-open,
+   > tooltip init, global AJAX handler). Never echo it before `<!DOCTYPE html>` or in
+   > `<head>` (e.g. at the very top of `_main.php`): the markup and scripts would land
+   > **outside `<html>`**, producing invalid HTML and scripts the browser won’t execute.
    >
-   > Bootstrap, if enabled, is auto-injected into `<head>` by a hook. Only `render()`’s output is intentionally left for the template to position, so you control where in the body it appears. Its side effects (checkout processing, access-param handling, gating redirects) run regardless of the echo position.
+   > **Where in the body matters**, because `render()` also runs its side effects (checkout
+   > processing, access-param **login**, gating redirects) *at the point you call it*. If your
+   > header/nav reflects the login state (e.g. `StripePlCustomerPortal::renderLoginLink()`),
+   > echo it near the **top of `<body>`, before the header**, so the state is up to date after
+   > a checkout or magic-link click. If nothing above depends on the login state, just before
+   > `</body>` is the convention.
+   >
+   > Bootstrap, if enabled, is auto-injected into `<head>` by a hook.
 
   - On the thank-you page, the module will display an access buttons block if the checkout contained products that require access.
   - On delivery/product pages marked with requires_access, users are gated: if they are not logged in or have not purchased, they are redirected to the sales page and prompted to log in.
