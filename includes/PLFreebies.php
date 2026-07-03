@@ -788,26 +788,43 @@ class PLFreebies extends Wire {
   private function ensureFreebieField(?array $templateNames = null): void {
     $fields    = $this->wire('fields');
     $templates = $this->wire('templates');
+    $san       = $this->wire('sanitizer');
     $name      = 'plf_freebie';
+    $label     = $this->_('Freebie: requires registration');
 
     $f = $fields->get($name);
     if (!$f || !$f->id) {
       $f = new Field();
       $f->type        = $this->wire("modules")->get('FieldtypeCheckbox');
       $f->name        = $name;
-      $f->label       = $this->_('Freebie');
+      $f->label       = $label;
       $f->description = $this->_('Mark this page as a free, registration-gated freebie.');
+      $f->columnWidth = 20;
+      $fields->save($f);
+    } elseif ((string) $f->label !== $label) {
+      $f->label = $label; // self-heal the label
       $fields->save($f);
     }
 
+    // Sit right after the product checkboxes (allow_multiple_purchases) so it shares
+    // their row; 20% wide. On freebie-only templates it just appends.
+    $allow = $fields->get('allow_multiple_purchases');
     $names = $templateNames ?? $this->getFreebieTemplateNames();
     foreach ($names as $tn) {
-      $t = $templates->get($tn);
+      $t = $templates->get($san->name($tn));
       if (!$t || !$t->id) continue;
-      if (!$t->fieldgroup->hasField($name)) {
-        $t->fieldgroup->add($f);
-        $t->fieldgroup->save();
+      $fg = $t->fieldgroup;
+
+      if ($allow && $allow->id && $fg->hasField($allow)) {
+        $fg->insertAfter($f, $allow); // repositions if already present (no data loss)
+      } elseif (!$fg->hasField($name)) {
+        $fg->add($f);
       }
+      $fg->save();
+
+      $ctx = $fg->getFieldContext($f);
+      $ctx->columnWidth = 20;
+      $fields->saveFieldgroupContext($ctx, $fg);
     }
   }
 

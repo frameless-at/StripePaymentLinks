@@ -1555,11 +1555,22 @@ public function processCheckout(Page $currentPage): void {
 			 }
 			 if ($changed) $fg->save();
 	 
-			 // Context: show stripe_product_id only when requires_access=1
+			 // Row layout: Stripe Product ID (40%, shown only when requires_access=1) +
+			 // the two checkboxes (20% each). The freebie service places plf_freebie (20%)
+			 // right next to them. The access-mail addon text keeps its own full-width row.
 			 $ctx = $fg->getFieldContext($fStripe);
 			 $ctx->showIf = 'requires_access=1';
+			 $ctx->columnWidth = 40;
 			 $fields->saveFieldgroupContext($ctx, $fg);
-			 
+
+			 $ctxReq = $fg->getFieldContext($fReq);
+			 $ctxReq->columnWidth = 20;
+			 $fields->saveFieldgroupContext($ctxReq, $fg);
+
+			 $ctxAllow = $fg->getFieldContext($fAllow);
+			 $ctxAllow->columnWidth = 20;
+			 $fields->saveFieldgroupContext($ctxAllow, $fg);
+
 			 $ctxAddon = $fg->getFieldContext($fAddon);
 			 $ctxAddon->columnWidth = 100;
 			 $fields->saveFieldgroupContext($ctxAddon, $fg);
