@@ -118,9 +118,10 @@ The module is designed for small e-commerce or membership scenarios where a full
 
    > ⚠️ **Echo the return value inside `<body>`.** `render()` returns the global frontend
    > chrome — the auth/withdrawal **modals plus their inline `<script>` blocks** (auto-open,
-   > tooltip init, global AJAX handler). Never echo it before `<!DOCTYPE html>` or in
-   > `<head>` (e.g. at the very top of `_main.php`): the markup and scripts would land
-   > **outside `<html>`**, producing invalid HTML and scripts the browser won’t execute.
+   > tooltip init, global AJAX handler). Placing it before `<!DOCTYPE html>` puts it
+   > **outside `<html>`** (invalid HTML, scripts won’t run); placing it in `<head>` puts
+   > visible modal markup where it doesn’t belong (the head is for metadata). Keep it in
+   > the `<body>`.
    >
    > **Where in the body matters**, because `render()` also runs its side effects (checkout
    > processing, access-param **login**, gating redirects) *at the point you call it*. If your
