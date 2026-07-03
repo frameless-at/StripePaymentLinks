@@ -300,21 +300,24 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			$this->wire('log')->save(self::LOG_MAIL, 'layout.html.php missing in module (includes/mail); using minimal HTML fallback.');
 		}
 
-		// Consume login tokens EARLY — in a Page::render BEFORE hook, so the login is
-		// established before the page (and its header/nav) renders. Fixes the stale header
-		// on the very request where the login happens: a Stripe checkout return
-		// (?session_id → processCheckout) or a magic-link click (?access → handleAccessParam).
-		// render() calls both too, but at its bottom-of-body position that is too late for a
-		// header login link. Both are idempotent (no-op without a token / already processed),
-		// so render()'s later calls stay safe. Registered before the freebie hooks so the
-		// login is in place before any gating check runs.
+		// Establish the post-checkout login EARLY — in a Page::render BEFORE hook, before the
+		// page (and its header/nav) renders — so a header login link shows the logged-in state
+		// on the Stripe checkout return itself (?session_id). render() runs processCheckout()
+		// too, but at its bottom-of-body position that is too late for the header. processCheckout
+		// emits no output and is idempotent (no-op without ?session_id / when already processed),
+		// so it is safe on every front-end page and render()'s later call stays a no-op.
+		//
+		// Deliberately does NOT call handleAccessParam() here: it reads ?t=, which collides with
+		// other modules' tokens (e.g. ProcessWire LoginRegister's forgot-password ?t=) and would
+		// wrongly show the "link expired" modal. Templates gate render() per page to avoid that
+		// (e.g. skipping the login template); a global hook must not bypass that gate. ?access
+		// magic-links are already consumed early by the freebie auto-gate and the /account hook.
 		$this->addHookBefore('Page::render', function(\ProcessWire\HookEvent $e) {
 			$page = $e->object;
 			if (!($page instanceof \ProcessWire\Page) || !$page->id) return;
 			if ($page->id !== (int) $this->wire('page')->id) return;        // main requested page only
 			if ($page->template && $page->template->name === 'admin') return;
 			$this->processCheckout($page);
-			$this->handleAccessParam();
 		});
 
 		// Freebies (lead-capture) live in core but stay DORMANT until configured.
