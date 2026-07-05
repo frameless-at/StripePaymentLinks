@@ -564,7 +564,7 @@ HTML;
 		$withTokens = strtr($text, ['{firstname}' => '%%FIRSTNAME%%', '{email}' => '%%EMAIL%%']);
 		$escaped    = htmlspecialchars($withTokens, ENT_QUOTES, 'UTF-8');
 
-		$firstname = $u ? $this->displayName($u) : '';
+		$firstname = $u ? $this->firstName($u) : '';
 		$email     = $u ? (string)$u->email     : '';
 		$fnEsc     = htmlspecialchars($firstname, ENT_QUOTES, 'UTF-8');
 		$emEsc     = htmlspecialchars($email, ENT_QUOTES, 'UTF-8');
@@ -583,8 +583,8 @@ HTML;
 	 * @param \ProcessWire\User $user The user to generate display name for.
 	 * @return string The display name.
 	 */
-	private function displayName(\ProcessWire\User $user): string
+	private function firstName(\ProcessWire\User $user): string
 	{
-		return $this->mod->displayName($user);
+		return $this->mod->firstName($user);
 	}
 }

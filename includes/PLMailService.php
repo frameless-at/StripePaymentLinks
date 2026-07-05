@@ -48,7 +48,7 @@ class PLMailService extends Wire {
 
 		$vars = [
 			'preheader'     => $preheader,
-			'firstname'     => $this->displayName($user),
+			'firstname'     => $this->firstName($user),
 			'productTitle'  => $repl['{title}'],
 			'productUrl'    => $productUrl,
 			'ctaText'       => $ctaText,
@@ -127,7 +127,7 @@ class PLMailService extends Wire {
 		$vars = [
 			// Inhalt
 			'preheader'     => $mod->t('mail.resetpwd.preheader'),
-			'firstname'     => $this->displayName($user),
+			'firstname'     => $this->firstName($user),
 			'productTitle'  => $mod->t('mail.resetpwd.title'),
 			'productUrl'    => $resetUrl,
 			'ctaText'       => $mod->t('mail.resetpwd.cta'),
@@ -190,7 +190,7 @@ class PLMailService extends Wire {
 
 		$vars = [
 			'preheader'     => $mod->t('mail.loginlink.preheader'),
-			'firstname'     => $this->displayName($user),
+			'firstname'     => $this->firstName($user),
 			'productTitle'  => $mod->t('mail.loginlink.title'),
 			'productUrl'    => $loginUrl,
 			'ctaText'       => $mod->t('mail.loginlink.cta'),
@@ -631,9 +631,9 @@ class PLMailService extends Wire {
 	/* =====================================================================
 	 * Helpers
 	 * ===================================================================*/
-	private function displayName(User $u): string
+	private function firstName(User $u): string
 	{
-		return $this->wire('modules')->get('StripePaymentLinks')->displayName($u);
+		return $this->wire('modules')->get('StripePaymentLinks')->firstName($u);
 	}
 
 	/** Render the provided PHP/HTML template with variables. */
