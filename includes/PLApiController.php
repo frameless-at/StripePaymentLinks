@@ -125,6 +125,24 @@ final class PLApiController {
    
 	 $type = (string) ($event->type ?? '(unknown)');
 	 $obj  = $event->data->object ?? null;
+
+	 // LanguageSupportPageNames' ready() did not attach its Page::localName/localPath hooks for this
+	 // webhook request (diagnosed: localPath not callable although the module is loaded), so page
+	 // saves below would throw "localPath not callable". Attach them the same way ready() does.
+	 if (wire('modules')->isInstalled('LanguageSupportPageNames')) {
+	   $plNeedsHooks = false;
+	   try { wire('pages')->get(1)->localPath(); } catch (\Throwable $plEx) { $plNeedsHooks = true; }
+	   if ($plNeedsHooks) {
+	     $plLspn = wire('modules')->get('LanguageSupportPageNames');
+	     if ($plLspn) {
+	       $plLspn->addHook('Page::localName', $plLspn, 'hookPageLocalName');
+	       $plLspn->addHook('Page::localUrl', $plLspn, 'hookPageLocalUrl');
+	       $plLspn->addHook('Page::localHttpUrl', $plLspn, 'hookPageLocalHttpUrl');
+	       $plLspn->addHook('Page::localPath', $plLspn, 'hookPageLocalPath');
+	       wire('log')->save(StripePaymentLinks::LOG_PL, '[WEBHOOK] attached LanguageSupportPageNames page hooks (ready did not run for this request)');
+	     }
+	   }
+	 }
    
 	 try {
 	   switch ($type) {
