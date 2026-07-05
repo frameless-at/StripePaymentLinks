@@ -249,6 +249,17 @@ final class PLApiController {
 		   break;
 		 }
    
+		 case 'checkout.session.completed': {
+		   $sessionId = (string)($obj->id ?? '');
+		   if ($sessionId === '') { wire('log')->save(StripePaymentLinks::LOG_PL, '[WEBHOOK] checkout.completed: missing session id'); break; }
+		   wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] checkout.completed: recording session {$sessionId}");
+		   // Backstop for a broken/abandoned redirect: record the purchase server-side.
+		   // Idempotent via findExistingPurchaseBySessionId, so it is a no-op if the
+		   // redirect (or a manual sync) already recorded this session.
+		   $this->mod->processCheckout(null, $sessionId, true);
+		   break;
+		 }
+
 		 default:
 		   wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] ignored event $type");
 		   break;

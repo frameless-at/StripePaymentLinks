@@ -838,34 +838,38 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	 * - Stores raw Stripe session (array) in meta 'stripe_session'.
 	 * - Stores per-product period end timestamps in meta 'period_end_map' => [productId => unix_ts].
 	 */
-public function processCheckout(Page $currentPage): void {
+public function processCheckout(?Page $currentPage = null, ?string $sessionIdOverride = null, bool $headless = false): void {
 	   $input   = $this->wire('input');
 	   $session = $this->wire('session');
 	   $users   = $this->wire('users');
 	 
-	   $sessionId = $input->get->text('session_id');
+	   $sessionId = $sessionIdOverride !== null ? $sessionIdOverride : $input->get->text('session_id');
 	   if (!$sessionId) return;
 
-	   // Idempotency (per browser session)
-	   $processed = $session->get('pl_processed_sessions') ?: [];
-	   if (in_array($sessionId, $processed, true)) return;
+	   // Idempotency (per browser session) - skipped in headless/webhook mode; the DB
+	   // check below (findExistingPurchaseBySessionId) is the real dedup either way.
+	   $processed = [];
+	   if (!$headless) {
+	     $processed = $session->get('pl_processed_sessions') ?: [];
+	     if (in_array($sessionId, $processed, true)) return;
+	   }
 
 	   // CRITICAL: Check if this session_id was already processed in the database
 	   $existing = $this->findExistingPurchaseBySessionId($sessionId);
 	   if ($existing !== null) {
-		   // Purchase already exists - mark as processed and skip
-		   $processed[] = $sessionId;
-		   $session->set('pl_processed_sessions', $processed);
-
 		   $this->wire('log')->save(
 			   self::LOG_PL,
 			   '[INFO] Duplicate session_id detected and prevented: ' . $sessionId .
-			   ' (already exists for user ' . $existing['user']->id . ')'
+			   ' (already exists for user ' . $existing['user']->id . ', source=' . ($headless ? 'webhook' : 'redirect') . ')'
 		   );
 
-		   // Log user in if not already
-		   if (!$this->wire('user')->isLoggedin() || $this->wire('user')->id !== $existing['user']->id) {
-			   $this->wire('session')->forceLogin($existing['user']);
+		   if (!$headless) {
+			   // Mark processed in the browser session and log the buyer in
+			   $processed[] = $sessionId;
+			   $session->set('pl_processed_sessions', $processed);
+			   if (!$this->wire('user')->isLoggedin() || $this->wire('user')->id !== $existing['user']->id) {
+				   $this->wire('session')->forceLogin($existing['user']);
+			   }
 		   }
 
 		   return;
@@ -1053,8 +1057,8 @@ public function processCheckout(Page $currentPage): void {
 		   $buyer->of(true);
 		 }
 	 
-		 // Enforce login
-		 if (!$this->wire('user')->isLoggedin() || $this->wire('user')->id !== $buyer->id) {
+		 // Enforce login (redirect/UI only; a webhook must not change login state)
+		 if (!$headless && (!$this->wire('user')->isLoggedin() || $this->wire('user')->id !== $buyer->id)) {
 		   $this->wire('session')->forceLogin($buyer);
 		 }
 	 
@@ -1074,7 +1078,7 @@ public function processCheckout(Page $currentPage): void {
 			 }
 			 $links[] = ['title' => (string)$p->title, 'url' => $url, 'id' => (int)$p->id];
 		   }
-		   $session->set('pl_access_links', $links);
+		   if (!$headless) $session->set('pl_access_links', $links);
 		 }
 	 
 		 if ($this->shouldSendAccessMail($isNew) && (!empty($links) || !empty($allMapped) || !empty($unmapped))) {
@@ -1088,11 +1092,13 @@ public function processCheckout(Page $currentPage): void {
 		   ];
 		   $this->mail()->sendAccessSummaryMail($this, $buyer, $links, array_values($allMapped), $unmapped, $orderMeta);
 		 }
-		 if ($alreadyDisallowed) $this->modal()->queueAlreadyPurchasedModal();
+		 if (!$headless && $alreadyDisallowed) $this->modal()->queueAlreadyPurchasedModal();
 	 
-		 // Mark session processed
-		 $processed[] = $sessionId;
-		 $session->set('pl_processed_sessions', $processed);
+		 // Mark session processed (browser session only)
+		 if (!$headless) {
+		   $processed[] = $sessionId;
+		   $session->set('pl_processed_sessions', $processed);
+		 }
 	 
 		 $this->wire('log')->save(
 		   self::LOG_PL,
