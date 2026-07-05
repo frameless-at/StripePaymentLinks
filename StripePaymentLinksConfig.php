@@ -336,7 +336,16 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		$ft->description = 'Templates whose pages can be marked as freebies. Adds the "plf_freebie" checkbox to these templates; pages with that box checked are listed/gated as freebies.';
 		foreach ($this->wire('templates') as $t) { if ($t->flags & Template::flagSystem) continue; $ft->addOption($t->name, $t->name); }
 		$ft->value = (array) $this->get('freebieTemplateNames');
+		$ft->columnWidth = 50;
 		$fsFree->add($ft);
+
+		$cfa = $this->modules->get('InputfieldCheckbox');
+		$cfa->name  = 'freebieCustomerAccess';
+		$cfa->label = 'Grant customers freebie access';
+		$cfa->notes = 'Anyone with the customer role (has purchased) already handed over their email at checkout, so they can open all freebies without registering separately. Off: customers register for freebies like everyone else.';
+		$cfa->columnWidth = 50;
+		$cfa->attr('checked', (bool) $this->get('freebieCustomerAccess'));
+		$fsFree->add($cfa);
 
 		$rt = $this->modules->get('InputfieldSelect');
 		$rt->name        = 'freebieRegisterTemplate';

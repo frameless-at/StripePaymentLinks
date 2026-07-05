@@ -249,6 +249,7 @@ class PLFreebies extends Wire {
     if ($user->isSuperuser()) return true;
     if (!$user->isLoggedin()) return false;
     if ($user->hasRole('member')) return true;
+    if ((bool) $this->mod->get('freebieCustomerAccess') && $user->hasRole('customer')) return true; // config: customers get all freebies
     if (!$user->hasField('plf_free_access')) return false;
     return (bool) $user->plf_free_access->has($freebie);
   }
