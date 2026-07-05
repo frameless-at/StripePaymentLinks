@@ -633,14 +633,7 @@ class PLMailService extends Wire {
 	 * ===================================================================*/
 	private function displayName(User $u): string
 	{
-		$t = trim((string) $u->title);
-		if ($t !== '') return $t; // kompletter Anzeigename („Mike Kozak“)
-		$email = (string) $u->email;
-		if ($email !== '') {
-			$at = strpos($email, '@');
-			return $at !== false ? substr($email, 0, $at) : $email;
-		}
-		return '';
+		return $this->wire('modules')->get('StripePaymentLinks')->displayName($u);
 	}
 
 	/** Render the provided PHP/HTML template with variables. */

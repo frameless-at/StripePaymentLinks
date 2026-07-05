@@ -2803,4 +2803,34 @@ public function processCheckout(Page $currentPage): void {
 
 		return ['first' => trim(implode(' ', $parts)), 'last' => trim($last)];
 	}
+
+	/**
+	 * The user's display name: the full name from `title`, else the email local part.
+	 * Single source of truth (deduped from the services/addons).
+	 */
+	public function displayName(User $u): string {
+		$t = trim((string) $u->title);
+		if ($t !== '') return $t;
+		$email = (string) $u->email;
+		if ($email !== '') {
+			$at = strpos($email, '@');
+			return $at !== false ? substr($email, 0, $at) : $email;
+		}
+		return '';
+	}
+
+	/**
+	 * The user's first name, derived from `title` via splitFullNameSmart(), else the
+	 * email local part. Use this for {firstname} placeholders.
+	 */
+	public function firstName(User $u): string {
+		$first = $this->splitFullNameSmart((string) $u->title)['first'];
+		if ($first !== '') return $first;
+		$email = (string) $u->email;
+		if ($email !== '') {
+			$at = strpos($email, '@');
+			return $at !== false ? substr($email, 0, $at) : $email;
+		}
+		return '';
+	}
 }

@@ -587,13 +587,9 @@ class PLFreebies extends Wire {
     // unfilled. No site-specific field names.
     $rv = function($fname) use ($reg) { return ($reg && $reg->hasField($fname)) ? trim((string) $reg->get($fname)) : ''; };
 
-    // We only store the member's full name (in `title`; user_name is a fallback).
-    // Derive a first name = first word, so the FIRSTNAME placeholder is an actual
-    // first name; NAME keeps the full name. Fall back to the email local part.
-    $fullName = trim((string) ($user->get('user_name') ?: $user->title));
-    if ($fullName === '') { $at = strpos((string) $user->email, '@'); $fullName = $at !== false ? substr($user->email, 0, $at) : (string) $user->email; }
-    $firstName = trim((string) explode(' ', $fullName)[0]);
-    if ($firstName === '') $firstName = $fullName;
+    // Full name (NAME) and first name (FIRSTNAME) from the shared core helpers.
+    $fullName  = $this->mod->displayName($user);
+    $firstName = $this->mod->firstName($user);
 
     $title     = ($freebie && $freebie->id) ? (string) $freebie->title : ($reg ? (string) $reg->title : '');
     $subject   = $rv('plf_mail_subject') !== '' ? $rv('plf_mail_subject') : $this->tLocal('mail.subject') . ($title !== '' ? ' – ' . $title : '');

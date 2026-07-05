@@ -585,11 +585,6 @@ HTML;
 	 */
 	private function displayName(\ProcessWire\User $user): string
 	{
-		if ($user->hasField('title') && $user->title) return trim((string)$user->title);
-		if (!empty($user->email)) {
-			$at = strpos($user->email, '@');
-			return $at !== false ? substr($user->email, 0, $at) : $user->email;
-		}
-		return '';
+		return $this->mod->displayName($user);
 	}
 }
