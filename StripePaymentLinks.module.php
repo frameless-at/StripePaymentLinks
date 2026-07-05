@@ -2767,4 +2767,40 @@ public function processCheckout(Page $currentPage): void {
 			'transferred' => $count,
 		];
 	}
+
+	/**
+	 * Split a full name into first + last. Handles the "Lastname, Firstname" comma
+	 * form and common name particles (von, van, de, ...). Single source of truth for
+	 * the name split across SPL and its addons; hookable so a site can override it for
+	 * its own name conventions without editing the core.
+	 *
+	 * @param string $full
+	 * @return array{first: string, last: string}
+	 */
+	public function ___splitFullNameSmart(string $full): array {
+		$full = trim(preg_replace('~\s+~u', ' ', $full));
+		if ($full === '') return ['first' => '', 'last' => ''];
+
+		if (strpos($full, ',') !== false) {
+			[$last, $first] = array_map('trim', explode(',', $full, 2));
+			if ($first === '' && $last !== '') return ['first' => $last, 'last' => ''];
+			return ['first' => $first, 'last' => $last];
+		}
+
+		$parts = preg_split('~\s+~u', $full) ?: [];
+		if (count($parts) === 1) return ['first' => $parts[0], 'last' => ''];
+
+		$particles = [
+			'von', 'van', 'der', 'den', 'de', 'del', 'della', 'di', 'da', 'dos', 'das',
+			'le', 'la', 'du', 'des', 'bin', 'ibn', 'al', 'el', 'st', 'st.',
+		];
+
+		$last   = array_pop($parts);
+		$penult = end($parts) !== false ? mb_strtolower(end($parts)) : '';
+		if ($penult !== '' && in_array($penult, $particles, true)) {
+			$last = array_pop($parts) . ' ' . $last;
+		}
+
+		return ['first' => trim(implode(' ', $parts)), 'last' => trim($last)];
+	}
 }
