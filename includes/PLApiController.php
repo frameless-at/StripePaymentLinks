@@ -142,8 +142,12 @@ final class PLApiController {
 			   $ended  = (isset($obj->ended_at) && is_numeric($obj->ended_at)) ? (int)$obj->ended_at : time();
    
 		   if ($keys) {
-			 $this->markCanceledForKeys($u, $keys, $ended, $subId);
-			 wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] subscription deleted (scoped) user {$u->id} sub={$subId} keys=" . implode(',', $keys));
+			 $matched = $this->markCanceledForKeys($u, $keys, $ended, $subId);
+			 if ($matched > 0) {
+			   wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] subscription deleted (scoped) user {$u->id} sub={$subId} keys=" . implode(',', $keys) . " ({$matched} purchase(s))");
+			 } else {
+			   wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] subscription deleted: no purchase matched sub={$subId} for user {$u->id} (keys=" . implode(',', $keys) . ")");
+			 }
 		   } else {
 			 wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] subscription deleted: no keys resolved (user {$u->id}, sub={$subId})");
 		   }
@@ -164,9 +168,13 @@ final class PLApiController {
 		   $periodEnd = (isset($obj->current_period_end) && is_numeric($obj->current_period_end)) ? (int)$obj->current_period_end : null;
    
 		   if ($keys) {
-			 $this->setPausedForKeys($u, $keys, $pausedNow, $subId);
+			 $matched = $this->setPausedForKeys($u, $keys, $pausedNow, $subId);
 			 if ($periodEnd) $this->updatePeriodEndForKeys($u, $keys, $periodEnd, true, $subId);
-			 wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] subscription updated (scoped) user {$u->id} sub={$subId} keys=" . implode(',', $keys) . ($pausedNow ? ' [paused]' : ''));
+			 if ($matched > 0) {
+			   wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] subscription updated (scoped) user {$u->id} sub={$subId} keys=" . implode(',', $keys) . ($pausedNow ? ' [paused]' : '') . " ({$matched} purchase(s))");
+			 } else {
+			   wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] subscription updated: no purchase matched sub={$subId} for user {$u->id} (keys=" . implode(',', $keys) . ")");
+			 }
 		   } else {
 			 wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] subscription updated: no keys resolved (user {$u->id}, sub={$subId})");
 		   }
@@ -187,8 +195,12 @@ final class PLApiController {
    
 		   if ($keys) {
 			 if ($periodEnd) $this->updatePeriodEndForKeys($u, $keys, $periodEnd, true, $subId);
-			 $this->setPausedForKeys($u, $keys, false, $subId);
-			 wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] subscription created (scoped) user {$u->id} sub={$subId} keys=" . implode(',', $keys));
+			 $matched = $this->setPausedForKeys($u, $keys, false, $subId);
+			 if ($matched > 0) {
+			   wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] subscription created (scoped) user {$u->id} sub={$subId} keys=" . implode(',', $keys) . " ({$matched} purchase(s))");
+			 } else {
+			   wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] subscription created: no purchase matched sub={$subId} for user {$u->id} (keys=" . implode(',', $keys) . ")");
+			 }
 		   } else {
 			 wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] subscription created: no keys resolved (user {$u->id}, sub={$subId})");
 		   }
@@ -211,13 +223,13 @@ final class PLApiController {
 			   if (!$keys) continue;
 			   // scope by subscription if present; otherwise unscoped (null)
 			   $subScope = ($subId !== null && $subId !== '') ? $subId : null;
-			   $this->updatePeriodEndForKeys($u, $keys, (int)$end, true, $subScope);
+			   $matched = $this->updatePeriodEndForKeys($u, $keys, (int)$end, true, $subScope);
 			   $this->setPausedForKeys($u, $keys, false, $subScope);
-			   wire('log')->save(
-				 StripePaymentLinks::LOG_PL,
-				 "[WEBHOOK] invoice.succeeded (scoped) user {$u->id} sub=" . ($subScope ?? '∅') .
-				 " keys=" . implode(',', $keys) . " → period_end={$end}"
-			   );
+			   if ($matched > 0) {
+				 wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] invoice.succeeded (scoped) user {$u->id} sub=" . ($subScope ?? '∅') . " keys=" . implode(',', $keys) . " → period_end={$end} ({$matched} purchase(s))");
+			   } else {
+				 wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] invoice.succeeded: no purchase matched sub=" . ($subScope ?? '∅') . " for user {$u->id} (keys=" . implode(',', $keys) . ") - period_end NOT applied");
+			   }
 			 }
 		   } else {
 			 wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] invoice.succeeded: nothing to update");
@@ -552,8 +564,8 @@ private function scopeKeyFromStripeProduct(string $stripeProductId): string {
     
 /** Update only the purchase whose meta['subscription_id'] matches */
 /** Update only the purchase whose meta['subscription_id'] matches (robust) */
-private function updatePurchasesMap(\ProcessWire\User $u, callable $mutator, ?string $subscriptionId = null): void {
-  if (!$u->hasField('spl_purchases') || !$u->spl_purchases->count()) return;
+private function updatePurchasesMap(\ProcessWire\User $u, callable $mutator, ?string $subscriptionId = null): int {
+  if (!$u->hasField('spl_purchases') || !$u->spl_purchases->count()) return 0;
 
   // treat empty string as null (no scoping)
   $subscriptionId = ($subscriptionId !== null && $subscriptionId !== '') ? $subscriptionId : null;
@@ -579,11 +591,10 @@ private function updatePurchasesMap(\ProcessWire\User $u, callable $mutator, ?st
 
 	  if ($stored !== $subscriptionId) continue;
 	}
+	$matched++;
 
 	$map     = (array) $p->meta('period_end_map');
-	$changed = ($mutator($map) === true);
-
-	if ($changed) {
+	if ($mutator($map) === true) {
 	  $p->of(false);
 	  $p->meta('period_end_map', $map);
 	  $p->save(['quiet' => true]);
@@ -591,18 +602,15 @@ private function updatePurchasesMap(\ProcessWire\User $u, callable $mutator, ?st
 	  if (method_exists($this->mod, 'rebuildPurchaseLines')) {
 		$this->mod->rebuildPurchaseLines($p);
 	  }
-	  $matched++;
 	}
   }
 
-  if ($subscriptionId !== null && $matched === 0) {
-	wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] no purchase matched subscription_id={$subscriptionId} for user {$u->id}");
-  }
+  return $matched;
 }
 
 /** Mark specific scope keys as CANCELED at given timestamp; remove any *_paused flag for those keys. */
-private function markCanceledForKeys(\ProcessWire\User $u, array $keys, int $endedTs, ?string $subscriptionId = null): void {
-  $this->updatePurchasesMap($u, function(array &$map) use ($keys, $endedTs): bool {
+private function markCanceledForKeys(\ProcessWire\User $u, array $keys, int $endedTs, ?string $subscriptionId = null): int {
+  return $this->updatePurchasesMap($u, function(array &$map) use ($keys, $endedTs): bool {
 	$changed = false;
 	foreach ($keys as $key) {
 	  $old = isset($map[$key]) && is_numeric($map[$key]) ? (int)$map[$key] : 0;
@@ -619,8 +627,8 @@ private function markCanceledForKeys(\ProcessWire\User $u, array $keys, int $end
 }
   
   /** Set or clear *_paused flags for the given scope keys (optionally scoped to a subscription). */
-  private function setPausedForKeys(\ProcessWire\User $u, array $keys, bool $paused, ?string $subscriptionId = null): void {
-	$this->updatePurchasesMap($u, function(array &$map) use ($keys, $paused): bool {
+  private function setPausedForKeys(\ProcessWire\User $u, array $keys, bool $paused, ?string $subscriptionId = null): int {
+	return $this->updatePurchasesMap($u, function(array &$map) use ($keys, $paused): bool {
 	  $changed = false;
 	  foreach ($keys as $key) {
 		$flagKey = $key . '_paused';
@@ -635,8 +643,8 @@ private function markCanceledForKeys(\ProcessWire\User $u, array $keys, int $end
   }
     
 /** Update period_end for given scope keys (optionally only if greater; optionally scoped to a subscription). */
-  private function updatePeriodEndForKeys(\ProcessWire\User $u, array $keys, int $periodEnd, bool $onlyIfGreater = true, ?string $subscriptionId = null): void {
-	$this->updatePurchasesMap($u, function(array &$map) use ($keys, $periodEnd, $onlyIfGreater): bool {
+  private function updatePeriodEndForKeys(\ProcessWire\User $u, array $keys, int $periodEnd, bool $onlyIfGreater = true, ?string $subscriptionId = null): int {
+	return $this->updatePurchasesMap($u, function(array &$map) use ($keys, $periodEnd, $onlyIfGreater): bool {
 	  $changed = false;
 	  foreach ($keys as $key) {
 		$old = isset($map[$key]) && is_numeric($map[$key]) ? (int)$map[$key] : 0;
