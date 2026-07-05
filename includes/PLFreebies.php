@@ -51,7 +51,7 @@ class PLFreebies extends Wire {
         if ($view === 'table') return;
         $user = $e->arguments(0);
         if (!($user instanceof User)) $user = $this->wire('user');
-        $e->return .= $this->renderFreebieCards($user);
+        $e->return .= $this->renderFreebieCards($user, ['onlyGranted' => true]);
       });
     }
 
@@ -374,9 +374,12 @@ class PLFreebies extends Wire {
    * Identical appearance to the purchased products (renderCard, single source).
    */
   public function renderFreebieCards(?User $user = null, array $opts = []): string {
+    $user ??= $this->wire('user');
     /** @var PageArray $pages */
     $pages = $opts['pages'] ?? $this->findFreebies();
     if (!$pages || !$pages->count()) return '';
+    // In the account hub we only show freebies the user can actually open (opts['onlyGranted']).
+    $onlyGranted = !empty($opts['onlyGranted']);
 
     // CustomerPortal is OPTIONAL: if present, use its card renderer for an identical
     // look; otherwise a slim own fallback card (Bootstrap).
@@ -385,13 +388,14 @@ class PLFreebies extends Wire {
 
     $out = '';
     foreach ($pages as $p) {
+      if ($onlyGranted && !$this->hasFreebieAccess($user, $p)) continue;
       $thumb = ($p->hasField('images') && $p->images->count())
         ? $p->images->first()->size(800, 600)->url : '';
       $out .= $cp
         ? $cp->renderCard((string) $p->title, $p->httpUrl, $thumb, '', '', $p)
         : $this->fallbackCard((string) $p->title, $p->httpUrl, $thumb);
     }
-    return ($cp ? $cp->cardCss() : '') . $out;
+    return $out === '' ? '' : ($cp ? $cp->cardCss() : '') . $out;
   }
 
   /** Slim fallback card if StripePlCustomerPortal is not installed. */
