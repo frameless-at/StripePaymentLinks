@@ -56,7 +56,8 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 
 	/** Session keys for impersonation (a superuser logged in as another user) */
 	public const SESS_IMPERSONATOR       = 'spl_impersonator';
-	public const SESS_IMPERSONATOR_NONCE = 'spl_impersonator_nonce';
+	public const SESS_IMPERSONATOR_NONCE  = 'spl_impersonator_nonce';
+	public const SESS_IMPERSONATOR_RETURN = 'spl_impersonator_return';
 
 	/** Services (lazy) */
 	private ?PLMailService       $mailService       = null;
@@ -1188,7 +1189,7 @@ public function processCheckout(?Page $currentPage = null, ?string $sessionIdOve
 	 * Stores the original superuser id (+ a return nonce) so stopImpersonation() can return.
 	 * The caller redirects afterwards (StripePlAdmin sends the admin to /account/). Hookable.
 	 */
-	public function ___impersonate(User $target): bool {
+	public function ___impersonate(User $target, string $returnUrl = ''): bool {
 		$me      = $this->wire('user');
 		$session = $this->wire('session');
 		if (!$me->isSuperuser()) {
@@ -1202,6 +1203,9 @@ public function processCheckout(?Page $currentPage = null, ?string $sessionIdOve
 		}
 		$session->set(self::SESS_IMPERSONATOR, (int) $me->id);
 		$session->set(self::SESS_IMPERSONATOR_NONCE, bin2hex(random_bytes(16)));
+		// Remember where the admin came from so stop can return there — local admin URLs only.
+		$adminUrl = (string) $this->wire('config')->urls->admin;
+		if ($returnUrl !== '' && strpos(ltrim($returnUrl, '/'), ltrim($adminUrl, '/')) === 0) $session->set(self::SESS_IMPERSONATOR_RETURN, $returnUrl);
 		$session->forceLogin($target);
 		$this->wire('log')->save(self::LOG_SEC, "Impersonation start: admin {$me->id} ({$me->name}) -> user {$target->id} ({$target->name})");
 		return true;
@@ -1219,6 +1223,7 @@ public function processCheckout(?Page $currentPage = null, ?string $sessionIdOve
 		$current = $this->wire('user');
 		$session->remove(self::SESS_IMPERSONATOR);
 		$session->remove(self::SESS_IMPERSONATOR_NONCE);
+		$session->remove(self::SESS_IMPERSONATOR_RETURN);
 		if ($adminId <= 0) return;
 		$admin = $this->wire('users')->get($adminId);
 		if ($admin && $admin->id && $admin->isSuperuser()) {
@@ -1256,8 +1261,11 @@ public function processCheckout(?Page $currentPage = null, ?string $sessionIdOve
 			$session->redirect($config->urls->root, false);
 			return;
 		}
+		$return   = (string) $session->get(self::SESS_IMPERSONATOR_RETURN);
+		$adminUrl = (string) $config->urls->admin;
 		$this->stopImpersonation();
-		$session->redirect($config->urls->admin, false);
+		$dest = ($return !== '' && strpos(ltrim($return, '/'), ltrim($adminUrl, '/')) === 0) ? $return : $adminUrl;
+		$session->redirect($dest, false);
 	}
 
 	/**
