@@ -395,7 +395,7 @@ class PLFreebies extends Wire {
         ? $cp->renderCard((string) $p->title, $p->httpUrl, $thumb, '', '', $p)
         : $this->fallbackCard((string) $p->title, $p->httpUrl, $thumb);
     }
-    return $out === '' ? '' : ($cp ? $cp->cardCss() : '') . $out;
+    return $out === '' ? '' : $out;
   }
 
   /** Slim fallback card if StripePlCustomerPortal is not installed. */
@@ -411,7 +411,10 @@ class PLFreebies extends Wire {
   /** Standalone freebie grid (renderFreebieCards in its own .row g-3). */
   public function renderFreebies(?User $user = null, array $opts = []): string {
     $cards = $this->renderFreebieCards($user, $opts);
-    return $cards === '' ? '' : '<div class="row g-3">' . $cards . '</div>';
+    if ($cards === '') return '';
+    // Standalone emits the shared overlay CSS here; inside the account hub the portal emits it.
+    $cp = $this->wire('modules')->isInstalled('StripePlCustomerPortal') ? $this->wire('modules')->get('StripePlCustomerPortal') : null;
+    return ($cp ? $cp->cardCss() : '') . '<div class="row g-3">' . $cards . '</div>';
   }
 
   /**
