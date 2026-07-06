@@ -1238,9 +1238,10 @@ public function processCheckout(?Page $currentPage = null, ?string $sessionIdOve
 		$name  = $san->entities($this->displayName($u) ?: (string) $u->name);
 		$nonce = (string) $this->wire('session')->get(self::SESS_IMPERSONATOR_NONCE);
 		$url   = $san->entities($this->apiUrl() . '/stop-impersonation?nonce=' . urlencode($nonce));
+		$who = '<strong>' . $name . '</strong>';
 		return '<div class="spl-impersonation-bar">'
-			 . '<span>Signed in as <strong>' . $name . '</strong></span>'
-			 . '<a href="' . $url . '">Return to admin</a>'
+			 . '<span>' . sprintf($this->_('Signed in as %s'), $who) . '</span>'
+			 . '<a href="' . $url . '">' . $this->_('Return to admin') . '</a>'
 			 . '</div>';
 	}
 
