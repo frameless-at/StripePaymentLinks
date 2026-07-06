@@ -148,6 +148,16 @@ Methods to call from your ProcessWire templates via
   scripts. Echo it inside `<body>` (see Usage above). Needed on frontend pages.
 - **`renderWithdrawalLink(string $cssClass = '', string $label = ''): string`** — a
   link that opens the right-of-withdrawal ("withdraw contract") modal.
+- **`displayName(User $u): string`** — the user's display name: `title` if set, else the
+  email local part. For greetings and "signed in as" labels.
+- **`firstName(User $u): string`** — the user's first name, derived from `title` via
+  `splitFullNameSmart()`, else the email local part. Single source for `{firstname}`
+  placeholders in mails and modals.
+- **`splitFullNameSmart(string $full): array`** *(hookable)* — splits one full name into
+  `['first' => …, 'last' => …]`, handling `"Last, First"`, name particles (`von`, `van`,
+  `de`) and multi-word names. Stripe delivers a single name field; this is the one place
+  that derives first/last from it (reused for Mailchimp FNAME/LNAME, greetings, …). Hook
+  it to override the heuristic.
 
 ### Freebies (lead capture)
 
@@ -197,6 +207,9 @@ until you select at least one Freebie template in the config.
   needed fields on it (`plf_intro`, `plf_form_button`, `plf_redirect`, `plf_success`,
   `plf_mail_subject`, `plf_mail_greeting`, `plf_mail_body`, `plf_mail_button`).
 - **Global register page** — optional fallback register page.
+- **Grant customers freebie access** — when on, anyone with the `customer` role (i.e. who
+  has purchased) can open every freebie without registering separately; they already handed
+  over their email at checkout. Off: customers register for freebies like everyone else.
 
 With no register page configured the module redirects to the home page and auto-opens
 the register **modal** instead.
@@ -242,6 +255,8 @@ https://yourdomain.com/stripepaymentlinks/api/stripe-webhook
 This endpoint automatically processes the following events:
 - Subscription cancellation, pause, resume, or renewal
 - Invoice payment success/failure
+- **Checkout completion** — records the purchase even if the buyer never returns through
+  the success redirect (see *Behavior* below)
 
 ### Webhook Events to Enable
 
@@ -250,6 +265,7 @@ When adding the webhook in Stripe, either:
 - **Send all events** (recommended for testing), **or**
 - **Select only the relevant subscription-related events:**
   ```
+  checkout.session.completed
   customer.subscription.updated
   customer.subscription.deleted
   customer.subscription.paused
@@ -275,6 +291,12 @@ After creating the webhook, copy the **Webhook Signing Secret** from Stripe and 
 - **Renewed** subscriptions extend access based on the new billing period.
 - Each purchase stores a per-product `period_end_map` (timestamp of subscription end).  
   The webhook updates this automatically when the subscription changes.
+- **Redirect-independent recording:** a purchase is normally recorded when the buyer returns
+  via the success redirect (`?session_id=…`). If that redirect is misconfigured or never
+  reached, `checkout.session.completed` records the same purchase from the webhook instead —
+  creating the user, granting access and sending the mail exactly as the redirect would.
+  Recording is idempotent (deduplicated by Stripe session id), so the redirect and the
+  webhook never produce a double purchase.
 
 ---
 
