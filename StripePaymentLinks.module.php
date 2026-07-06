@@ -1239,7 +1239,7 @@ public function processCheckout(?Page $currentPage = null, ?string $sessionIdOve
 		$nonce = (string) $this->wire('session')->get(self::SESS_IMPERSONATOR_NONCE);
 		$url   = $san->entities($this->apiUrl() . '/stop-impersonation?nonce=' . urlencode($nonce));
 		return '<div class="spl-impersonation-bar">'
-			 . 'Signed in as <strong>' . $name . '</strong>'
+			 . '<span>Signed in as <strong>' . $name . '</strong></span>'
 			 . '<a href="' . $url . '">Return to admin</a>'
 			 . '</div>';
 	}
