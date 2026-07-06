@@ -54,6 +54,10 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 	public const LOG_MAIL = 'mail';
 	public const LOG_SEC  = 'security';
 
+	/** Session keys for impersonation (a superuser logged in as another user) */
+	public const SESS_IMPERSONATOR       = 'spl_impersonator';
+	public const SESS_IMPERSONATOR_NONCE = 'spl_impersonator_nonce';
+
 	/** Services (lazy) */
 	private ?PLMailService       $mailService       = null;
 	private ?PLModalService      $modalService      = null;
@@ -338,6 +342,22 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 
 		$this->addHook('/stripepaymentlinks/api/stripe-webhook', function($event) {
 			$this->api()->handleStripeWebhook($event);
+		});
+
+		// Impersonation: end an impersonation session and return to the admin. Guarded by the
+		// session marker + a one-time nonce, so only the impersonator can trigger it. Started from
+		// StripePlAdmin via impersonate().
+		$this->addHook('/stripepaymentlinks/api/stop-impersonation', function($event) {
+			$this->handleStopImpersonation();
+		});
+
+		// Impersonation banner: while impersonating, inject a fixed "logged in as X" bar with a
+		// one-click return on every front-end page (independent of whether a template calls render()).
+		$this->addHookAfter('Page::render', function(\ProcessWire\HookEvent $e) {
+			if (!$this->isImpersonating()) return;
+			$html = (string) $e->return;
+			if (stripos($html, '</body>') === false) return;
+			$e->return = str_ireplace('</body>', $this->renderImpersonationBanner() . '</body>', $html);
 		});
 		
 		$this->addHook('/stripepaymentlinks/api', function($event) {
@@ -1157,6 +1177,84 @@ public function processCheckout(?Page $currentPage = null, ?string $sessionIdOve
 			$session->forceLogin($u);
 			$this->wire('log')->save(self::LOG_SEC, 'Soft-login via valid access token '.$u->id);
 		}
+	}
+
+	/**
+	 * Impersonation: log in as another user. Superuser-only and never another superuser.
+	 * Stores the original superuser id (+ a return nonce) so stopImpersonation() can return.
+	 * The caller redirects afterwards (StripePlAdmin sends the admin to /account/). Hookable.
+	 */
+	public function ___impersonate(User $target): bool {
+		$me      = $this->wire('user');
+		$session = $this->wire('session');
+		if (!$me->isSuperuser()) {
+			$this->wire('log')->save(self::LOG_SEC, "Impersonation denied: user {$me->id} is not a superuser");
+			return false;
+		}
+		if (!$target || !$target->id || (int) $target->id === (int) $me->id) return false;
+		if ($target->isSuperuser()) {
+			$this->wire('log')->save(self::LOG_SEC, "Impersonation refused: target {$target->id} is a superuser");
+			return false;
+		}
+		$session->set(self::SESS_IMPERSONATOR, (int) $me->id);
+		$session->set(self::SESS_IMPERSONATOR_NONCE, bin2hex(random_bytes(16)));
+		$session->forceLogin($target);
+		$this->wire('log')->save(self::LOG_SEC, "Impersonation start: admin {$me->id} ({$me->name}) -> user {$target->id} ({$target->name})");
+		return true;
+	}
+
+	/** Whether the current session is an impersonation (a superuser logged in as someone else). */
+	public function isImpersonating(): bool {
+		return (int) $this->wire('session')->get(self::SESS_IMPERSONATOR) > 0;
+	}
+
+	/** End impersonation and restore the original superuser. The caller redirects afterwards. */
+	public function stopImpersonation(): void {
+		$session = $this->wire('session');
+		$adminId = (int) $session->get(self::SESS_IMPERSONATOR);
+		$current = $this->wire('user');
+		$session->remove(self::SESS_IMPERSONATOR);
+		$session->remove(self::SESS_IMPERSONATOR_NONCE);
+		if ($adminId <= 0) return;
+		$admin = $this->wire('users')->get($adminId);
+		if ($admin && $admin->id && $admin->isSuperuser()) {
+			$session->forceLogin($admin);
+			$this->wire('log')->save(self::LOG_SEC, "Impersonation end: user {$current->id} -> admin {$admin->id} ({$admin->name})");
+		} else {
+			$session->logout();
+			$this->wire('log')->save(self::LOG_SEC, "Impersonation end: stored admin $adminId invalid, logged out");
+		}
+	}
+
+	/** The fixed impersonation bar (rendered on every front-end page while impersonating). */
+	public function renderImpersonationBanner(): string {
+		if (!$this->isImpersonating()) return '';
+		$san   = $this->wire('sanitizer');
+		$u     = $this->wire('user');
+		$name  = $san->entities($this->displayName($u) ?: (string) $u->name);
+		$nonce = (string) $this->wire('session')->get(self::SESS_IMPERSONATOR_NONCE);
+		$url   = $san->entities($this->apiUrl() . '/stop-impersonation?nonce=' . urlencode($nonce));
+		return '<div style="position:fixed;left:0;right:0;bottom:0;z-index:2147483647;'
+			 . 'background:#b17453;color:#fff;font:600 14px/1.45 system-ui,sans-serif;'
+			 . 'padding:10px 16px;text-align:center;box-shadow:0 -2px 10px rgba(0,0,0,.3)">'
+			 . 'Signed in as <strong>' . $name . '</strong>'
+			 . ' &nbsp;<a href="' . $url . '" style="color:#fff;text-decoration:underline">Return to admin</a>'
+			 . '</div>';
+	}
+
+	/** Endpoint handler for /stripepaymentlinks/api/stop-impersonation (nonce-guarded). */
+	protected function handleStopImpersonation(): void {
+		$session = $this->wire('session');
+		$config  = $this->wire('config');
+		if (!$this->isImpersonating()) { $session->redirect($config->urls->root, false); return; }
+		$nonce = $this->wire('input')->get->text('nonce');
+		if ($nonce === '' || !hash_equals((string) $session->get(self::SESS_IMPERSONATOR_NONCE), $nonce)) {
+			$this->wire('log')->save(self::LOG_SEC, 'Impersonation stop refused: bad nonce');
+			$session->redirect($config->urls->root, false);
+			return;
+		}
+		$this->stopImpersonation();
+		$session->redirect($config->urls->admin, false);
 	}
 
 	/**
