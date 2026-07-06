@@ -357,6 +357,8 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 			if (!$this->isImpersonating()) return;
 			$html = (string) $e->return;
 			if (stripos($html, '</body>') === false) return;
+			$link = '<link rel="stylesheet" href="' . $this->wire('config')->urls->siteModules . $this->className() . '/css/impersonation.css">';
+			if (stripos($html, '</head>') !== false) $html = str_ireplace('</head>', $link . '</head>', $html);
 			$e->return = str_ireplace('</body>', $this->renderImpersonationBanner() . '</body>', $html);
 		});
 		
@@ -1234,14 +1236,7 @@ public function processCheckout(?Page $currentPage = null, ?string $sessionIdOve
 		$name  = $san->entities($this->displayName($u) ?: (string) $u->name);
 		$nonce = (string) $this->wire('session')->get(self::SESS_IMPERSONATOR_NONCE);
 		$url   = $san->entities($this->apiUrl() . '/stop-impersonation?nonce=' . urlencode($nonce));
-		$css = '<style id="spl-impersonation-css">'
-			 . '.spl-impersonation-bar{position:fixed;left:0;right:0;bottom:0;z-index:2147483647;'
-			 . 'padding:12px 16px;text-align:center;background:#b45309;color:#fff;'
-			 . 'font:600 14px/1.45 system-ui,-apple-system,sans-serif;box-shadow:0 -2px 10px rgba(0,0,0,.3)}'
-			 . '.spl-impersonation-bar a{color:#fff;text-decoration:underline;margin-left:12px}'
-			 . '</style>';
-		return $css
-			 . '<div class="spl-impersonation-bar">'
+		return '<div class="spl-impersonation-bar">'
 			 . 'Signed in as <strong>' . $name . '</strong>'
 			 . '<a href="' . $url . '">Return to admin</a>'
 			 . '</div>';

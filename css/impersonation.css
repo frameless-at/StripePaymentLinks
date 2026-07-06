@@ -1,0 +1,21 @@
+/* Impersonation bar — shown on every front-end page while a superuser is logged in as
+   another user. Re-theme by overriding .spl-impersonation-bar in your own stylesheet. */
+.spl-impersonation-bar {
+	position: fixed;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 2147483647;
+	padding: 12px 16px;
+	text-align: center;
+	background: #b45309;
+	color: #fff;
+	font: 600 14px/1.45 system-ui, -apple-system, sans-serif;
+	box-shadow: 0 -2px 10px rgba(0, 0, 0, .3);
+}
+
+.spl-impersonation-bar a {
+	color: #fff;
+	text-decoration: underline;
+	margin-left: 12px;
+}
