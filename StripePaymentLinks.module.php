@@ -1234,11 +1234,16 @@ public function processCheckout(?Page $currentPage = null, ?string $sessionIdOve
 		$name  = $san->entities($this->displayName($u) ?: (string) $u->name);
 		$nonce = (string) $this->wire('session')->get(self::SESS_IMPERSONATOR_NONCE);
 		$url   = $san->entities($this->apiUrl() . '/stop-impersonation?nonce=' . urlencode($nonce));
-		return '<div style="position:fixed;left:0;right:0;bottom:0;z-index:2147483647;'
-			 . 'background:#b17453;color:#fff;font:600 14px/1.45 system-ui,sans-serif;'
-			 . 'padding:10px 16px;text-align:center;box-shadow:0 -2px 10px rgba(0,0,0,.3)">'
+		$css = '<style id="spl-impersonation-css">'
+			 . '.spl-impersonation-bar{position:fixed;left:0;right:0;bottom:0;z-index:2147483647;'
+			 . 'padding:12px 16px;text-align:center;background:#b45309;color:#fff;'
+			 . 'font:600 14px/1.45 system-ui,-apple-system,sans-serif;box-shadow:0 -2px 10px rgba(0,0,0,.3)}'
+			 . '.spl-impersonation-bar a{color:#fff;text-decoration:underline;margin-left:12px}'
+			 . '</style>';
+		return $css
+			 . '<div class="spl-impersonation-bar">'
 			 . 'Signed in as <strong>' . $name . '</strong>'
-			 . ' &nbsp;<a href="' . $url . '" style="color:#fff;text-decoration:underline">Return to admin</a>'
+			 . '<a href="' . $url . '">Return to admin</a>'
 			 . '</div>';
 	}
 
