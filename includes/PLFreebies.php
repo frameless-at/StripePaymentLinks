@@ -167,7 +167,7 @@ class PLFreebies extends Wire {
 
   /**
    * Ensure the `member` role exists — this module's own access role for freebies
-   * (analogous to SPL's `customer`). Makes StripePlFreebies work standalone: the
+   * (analogous to SPL's `customer`). Makes the freebies service self-contained: the
    * role is created on install/config-save so createOrGetMember()/hasFreebieAccess()
    * have it. Idempotent; reuses an existing `member` role if present.
    */
@@ -576,7 +576,7 @@ class PLFreebies extends Wire {
 
   /**
    * Sends the freebie access mail (magic link). HOOKABLE: sites build it via
-   * addHookBefore('StripePlFreebies::sendFreebieMail', fn, ['replace'=>true]) entirely
+   * addHookBefore('PLFreebies::sendFreebieMail', fn, ['replace'=>true]) entirely
    * from their own CMS fields (e.g. this site's ah_register fields, see ready.php).
    * Default: neutral, freebie-suitable mail (NO purchase/withdrawal text).
    *
@@ -704,7 +704,7 @@ class PLFreebies extends Wire {
       $magicUrl = $target . $glue . 'access=' . urlencode($token);
 
       // Freebie mail (NOT SPL's purchase mail). Hookable: sites can build it via
-      // addHookBefore('StripePlFreebies::sendFreebieMail', ... $e->replace=true)
+      // addHookBefore('PLFreebies::sendFreebieMail', ... $e->replace=true)
       // entirely from their own CMS fields (see site/ready.php).
       $registerPage = $this->resolveRegisterPage($freebie);
       $this->sendFreebieMail($user, ($freebie && $freebie->id) ? $freebie : null, $registerPage, $magicUrl, (bool) ($res['isNew'] ?? true));

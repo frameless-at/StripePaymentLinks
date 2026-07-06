@@ -130,7 +130,7 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		// Passwordless login link
 		'modal.login.magiclink_link'    => $this->_('Can’t sign in? Email me a login link'),
 		'modal.login.magiclink_tooltip' => $this->_('Never set a password (e.g. after a purchase)? Enter your email and we’ll send you a link to sign in without one. Use the same email address you bought with.'),
-		// Registration link (modal provided by StripePlFreebies)
+		// Registration link (modal provided by the core freebies service)
 		'modal.login.register_link'     => $this->_('Create an account'),
 		'modal.login.register_tooltip'  => $this->_('No account yet? Create one here for free (e.g. to get freebies) — no purchase needed.'),
 		'modal.loginlink.title'      => $this->_('Sign in with a link'),
@@ -1177,7 +1177,7 @@ public function processCheckout(?Page $currentPage = null, ?string $sessionIdOve
 	 * a logged-in user whose must_set_password is set? Default: only on gated
 	 * product pages (requires_access). Integrators attach via
 	 * addHookAfter('StripePaymentLinks::promptSetPasswordOnPage') to extend it to
-	 * their pages (e.g. StripePlCustomerPortal → /account, StripePlFreebies →
+	 * their pages (e.g. StripePlCustomerPortal → /account, the freebies service →
 	 * freebie pages), so members who arrived via a magic link get reminded there.
 	 *
 	 * @param \ProcessWire\Page $page

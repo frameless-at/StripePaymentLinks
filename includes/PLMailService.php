@@ -235,7 +235,7 @@ class PLMailService extends Wire {
 	/**
 	 * Public convenience around the shared branded layout: fills brand defaults
 	 * from the module and derives the plain-text part, then delegates to the
-	 * private sendBrandedMail(). Lets add-ons (e.g. StripePlFreebies) reuse the
+	 * private sendBrandedMail(). Lets add-ons (e.g. the freebies service) reuse the
 	 * exact same look as the SPL mails by passing only content vars
 	 * (headline/leadHtml/leadText, productUrl, ctaText, closingText,
 	 * signatureName, productTitle, preheader).
