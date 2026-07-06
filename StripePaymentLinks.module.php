@@ -356,10 +356,12 @@ class StripePaymentLinks extends WireData implements Module, ConfigurableModule 
 		$this->addHookAfter('Page::render', function(\ProcessWire\HookEvent $e) {
 			if (!$this->isImpersonating()) return;
 			$html = (string) $e->return;
-			if (stripos($html, '</body>') === false) return;
+			if (stripos($html, '<body') === false) return;
 			$link = '<link rel="stylesheet" href="' . $this->wire('config')->urls->siteModules . $this->className() . '/css/impersonation.css">';
 			if (stripos($html, '</head>') !== false) $html = str_ireplace('</head>', $link . '</head>', $html);
-			$e->return = str_ireplace('</body>', $this->renderImpersonationBanner() . '</body>', $html);
+			$bar = $this->renderImpersonationBanner();
+			// Insert the bar as the first element in the body so it takes real layout space.
+			$e->return = preg_replace_callback('/<body\b[^>]*>/i', function($m) use ($bar) { return $m[0] . $bar; }, $html, 1);
 		});
 		
 		$this->addHook('/stripepaymentlinks/api', function($event) {
