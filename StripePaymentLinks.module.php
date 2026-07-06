@@ -1712,7 +1712,7 @@ public function processCheckout(?Page $currentPage = null, ?string $sessionIdOve
 		 }
 	 }	
 /** Collect Stripe API keys from config (multi-line textarea). */
-	private function getStripeKeys(): array {
+	public function getStripeKeys(): array {
 		$cfgKeys = $this->stripeApiKeys ?? [];
 		if (is_string($cfgKeys)) {
 			$cfgKeys = preg_split('~\r\n|\r|\n~', $cfgKeys) ?: [];
