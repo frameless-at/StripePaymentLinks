@@ -1,16 +1,24 @@
 /* Impersonation bar — shown at the very top of every front-end page while a superuser is
    logged in as another user. Injected as the first element in <body> and made sticky, so it
    takes real layout space (pushes everything below it down and never overlaps content).
-   Re-theme by overriding .spl-impersonation-bar in your own stylesheet.
-   This file is only loaded while impersonating, so the rules below apply only then. */
+   This file is only loaded while impersonating, so the rules below apply only then.
+
+   The bar has a FIXED height (single line, no wrap), and the navbar offset uses the SAME
+   variable — so the offset is correct by construction, not a guessed number. Re-theme by
+   overriding --spl-impersonation-height / .spl-impersonation-bar in your own stylesheet. */
+:root {
+	--spl-impersonation-height: 40px;
+}
+
 .spl-impersonation-bar {
 	position: sticky;
 	top: 0;
 	z-index: 2147483647;
-	height: 40px;
+	height: var(--spl-impersonation-height);
 	display: flex;
 	align-items: center;
 	justify-content: center;
+	white-space: nowrap;
 	padding: 0 16px;
 	background: #000;
 	color: #fff;
@@ -23,9 +31,9 @@
 	margin-left: 12px;
 }
 
-/* Keep fixed / sticky navbars below the bar instead of under it. */
+/* Keep fixed / sticky navbars below the bar — same height variable, so it always matches. */
 .fixed-top,
 .navbar.fixed-top,
 .sticky-top {
-	top: 40px !important;
+	top: var(--spl-impersonation-height) !important;
 }
