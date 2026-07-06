@@ -160,6 +160,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		$fsLogin = $this->modules->get('InputfieldFieldset');
 		$fsLogin->label = 'Login procedure';
 		$fsLogin->name  = 'pl_login_procedure';
+		$fsLogin->collapsed = Inputfield::collapsedYes;
 		$fsLogin->description = 'Which options are offered below the login form. With a customer area, a passwordless login link usually replaces the reset link (users change their password inside their account).';
 
 		$cbReset = $this->modules->get('InputfieldCheckbox');
@@ -328,7 +329,7 @@ class StripePaymentLinksConfig extends ModuleConfig {
 		$fsFree->label = 'Freebies (lead capture)';
 		$fsFree->name  = 'pl_freebies';
 		$fsFree->description = 'Optional. Free, registration-gated content (lead magnets). Leave the templates empty to keep it disabled — no freebie fields/role are created until a Freebie template is selected here.';
-		$fsFree->collapsed = Inputfield::collapsedBlank;
+		$fsFree->collapsed = Inputfield::collapsedYes;
 
 		$ft = $this->modules->get('InputfieldAsmSelect');
 		$ft->name        = 'freebieTemplateNames';
