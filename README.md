@@ -318,6 +318,27 @@ After creating the webhook, copy the **Webhook Signing Secret** from Stripe and 
 
 ---
 
+## Impersonation
+
+A superuser can **log in as another user** to see exactly what that customer sees (support,
+debugging). The trigger lives in **StripePlAdmin** (a "log in as" link per customer); the
+mechanics live here in the core.
+
+- **Superuser only.** Impersonating another superuser, or yourself, is refused.
+- `impersonate(User $target)` stores the original superuser id (+ a one-time nonce) in the
+  session, switches the login and audit-logs it to the *security* channel; the caller redirects
+  (StripePlAdmin lands on `/account/`).
+- A fixed **banner** (“Signed in as X — Return to admin”) is injected on every
+  front-end page while impersonating, via a `Page::render` hook (independent of `render()`).
+- The return link hits `/stripepaymentlinks/api/stop-impersonation` (nonce-guarded), which
+  restores the original superuser and redirects back to the admin — only the impersonator
+  can trigger it.
+
+**Template API:** `impersonate(User)`, `stopImpersonation()`, `isImpersonating()`,
+`renderImpersonationBanner()`.
+
+---
+
 ## Multi-Email Account Merge
 
 Some customers purchase with different email addresses and end up with multiple accounts. The **Account Merge** tool consolidates all purchases from a source account into a target account.
