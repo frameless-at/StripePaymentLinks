@@ -292,11 +292,14 @@ After creating the webhook, copy the **Webhook Signing Secret** from Stripe and 
 - Each purchase stores a per-product `period_end_map` (timestamp of subscription end).  
   The webhook updates this automatically when the subscription changes.
 - **Redirect-independent recording:** a purchase is normally recorded when the buyer returns
-  via the success redirect (`?session_id=…`). If that redirect is misconfigured or never
-  reached, `checkout.session.completed` records the same purchase from the webhook instead —
-  creating the user, granting access and sending the mail exactly as the redirect would.
-  Recording is idempotent (deduplicated by Stripe session id), so the redirect and the
-  webhook never produce a double purchase.
+  via the success redirect (`?session_id=…`). **This backstop requires the Stripe webhook to be
+  configured** (endpoint + signing secret, with `checkout.session.completed` enabled — see above).
+  With it in place, a misconfigured or never-reached redirect no longer loses the sale:
+  `checkout.session.completed` records the same purchase from the webhook instead — creating the
+  user, granting access and sending the mail exactly as the redirect would. Recording is idempotent
+  (deduplicated by Stripe session id), so the redirect and the webhook never produce a double
+  purchase. Without the webhook configured, there is no backstop — the redirect stays the only
+  recording path.
 
 ---
 
@@ -509,7 +512,7 @@ slot for the consumer-rights block. The module passes raw HTML in
 ## Configuration
 
 - **Stripe Secret API Key**
-- **Stripe Webhook Signing Secret** (optional, needed only for handling subscriptions)
+- **Stripe Webhook Signing Secret** (needed for subscription handling and for redirect-independent purchase recording)
 - **Product templates** (to enable `requires_access` / `allow_multiple_purchases` flags)
 - **Access mail policy** (`never`, `newUsersOnly`, `always`)
 - **Access token TTL in minutes** (default TTL for access tokens)
