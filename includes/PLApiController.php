@@ -253,9 +253,11 @@ final class PLApiController {
 			 wire('log')->save(StripePaymentLinks::LOG_PL, "[WEBHOOK] invoice.succeeded: nothing to update");
 		   }
 
-		   // Store renewal if not initial subscription creation
+		   // Store a renewal only for genuine subscription renewals. A one-time payment with
+		   // invoice_creation also fires invoice.payment_succeeded (billing_reason 'manual', no
+		   // subscription) and must NOT count as a renewal.
 		   $billingReason = (string)($obj->billing_reason ?? '');
-		   if ($billingReason !== 'subscription_create' && $billingReason !== '') {
+		   if (strpos($billingReason, 'subscription') === 0 && $billingReason !== 'subscription_create') {
 			   $this->addRenewalFromInvoice($u, $obj);
 		   }
 		   break;
