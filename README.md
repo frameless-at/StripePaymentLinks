@@ -172,7 +172,10 @@ for pages flagged `plf_freebie` — no call needed.
   show or hide content.
 - **`getFreebiesData(?User $user = null, array $opts = []): array`** — structured
   freebie data if you want to build your own markup.
-- **`grantFreebie(User $user, Page $freebie): void`** — grant access manually.
+- **`grantFreebie(User $user, Page $freebie): void`** — grant access manually. Only
+  grants pages that really are freebies (`plf_freebie` + a configured Freebie template);
+  anything else is refused and logged.
+- **`isFreebiePage(?Page $page): bool`** — the check behind that rule.
 
 Rarely needed (handled automatically): `requireFreebieAccess()` (the `plf_freebie`
 auto-gate already does this), `renderRegisterModal()` (auto-injected where offered),
@@ -193,10 +196,23 @@ until you select at least one Freebie template in the config.
    configure). The page is then **auto-gated** — no template code needed, exactly like
    `requires_access` for paid products.
 2. A guest hitting a gated freebie is sent to your register form (or a register modal)
-   and signs up with name + email → a `member` user is created and a **passwordless
-   access link** is emailed (double opt-in).
-3. Clicking the link logs the user in and lands them on the freebie. Members have access
-   to **all** freebies.
+   and signs up with name + email. The submit itself **creates nothing** — it only emails
+   a **confirmation link** (`?plfconfirm=`) carrying a signed, stateless token.
+3. Opening that link is what creates the `member` user, grants the freebie and signs the
+   visitor in, passwordless, landing them on the freebie. Members have access to **all**
+   freebies. An unconfirmed sign-up leaves no trace: no user, no grant, no login.
+
+**Sign-up protection** (always on, no configuration)
+
+- **Honeypot** — a CSS-hidden decoy field in both register renderers.
+- **Time trap** — a submit within 3 seconds of the form being rendered is dropped, as is
+  a form older than 24 hours.
+- **Rate limit** — 3 sign-ups per hour per IP *and* per email address, so neither a mass
+  POST nor a mail flood against a stranger's inbox gets through.
+- **Plausibility** — throwaway-mailbox domains, domains without an MX record (fail-open
+  when the resolver itself is unreachable) and spam-shaped names are rejected.
+- Every one of these answers with the same generic `ok:true` as a real sign-up (no email
+  enumeration) and writes one entry to the `security` log.
 
 **Configuration** (module config → *Freebies (lead capture)*)
 

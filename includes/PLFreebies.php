@@ -17,8 +17,12 @@ use ProcessWire\InputfieldWrapper;
  *
  * No page/URL of its own. The core module exposes the template-callable methods
  * (renderRegisterForm/renderFreebies/getFreebiesData/hasFreebieAccess/
- * requireFreebieAccess/grantFreebie) and delegates here. Self-signup creates a
- * `member` user + must_set_password and grants the freebie; opt-in via ?access= link.
+ * requireFreebieAccess/grantFreebie) and delegates here.
+ *
+ * Sign-up is DOUBLE OPT-IN: the form POST creates nothing but a signed, stateless
+ * pending token that travels in the confirmation mail (?plfconfirm=). Only opening
+ * that link materialises the `member` user (+ must_set_password), grants the freebie
+ * and logs the visitor in. A POST alone therefore leaves no trace in the user table.
  */
 class PLFreebies extends Wire {
 
@@ -28,12 +32,38 @@ class PLFreebies extends Wire {
   /** TTL of the magic link token (minutes). */
   const MAGIC_TTL_MINUTES = 60 * 24 * 3; // 3 days – freebies kept intentionally low-barrier
 
+  /** GET parameter carrying the pending-signup token. Deliberately NOT ?access=, which belongs to SPL::handleAccessParam(). */
+  private const CONFIRM_PARAM = 'plfconfirm';
+
+  /** Bot traps. Own constants + cache prefix so freebies and withdrawals never share a counter. */
+  private const HONEYPOT     = 'website';
+  private const RATE_LIMIT   = 3;              // max submissions per window, per IP and per address
+  private const RATE_WINDOW  = 3600;           // 1 hour
+  private const RATE_PREFIX  = 'spl_freebie_rl_';
+  private const SESS_FORM_TS = 'plf_form_ts';  // render timestamp of the last register form
+  private const MIN_FILL_SECONDS = 3;          // faster than a human can fill the form
+  private const MAX_FORM_AGE     = 86400;      // a day-old tab is no longer a fresh form
+
+  /** Name field limits (the display name comes straight from it, so it is a spam target). */
+  private const NAME_MAX_LENGTH = 80;
+
+  /** Throwaway mailbox providers – a lead from here is worthless by definition. */
+  private const DISPOSABLE_DOMAINS = [
+    '10minutemail.com', 'dispostable.com', 'discard.email', 'emailondeck.com',
+    'fakeinbox.com', 'getnada.com', 'guerrillamail.com', 'mailcatch.com',
+    'maildrop.cc', 'mailinator.com', 'mailnesia.com', 'moakt.com', 'mohmal.com',
+    'sharklasers.com', 'spamgourmet.com', 'temp-mail.org', 'tempmail.com',
+    'tempmailo.com', 'tempr.email', 'throwawaymail.com', 'trashmail.com',
+    'yopmail.com',
+  ];
+
   /* ========================= Lifecycle ========================= */
 
   /**
    * Registers the freebie hooks. Called from StripePaymentLinks::init(). Every hook
-   * self-gates (plf_freebie field / showRegisterLink config / freebie_register op),
-   * so on installs without any freebie configuration they stay completely inert.
+   * self-gates (plf_freebie field / showRegisterLink config / freebie_register op /
+   * plfconfirm parameter), so on installs without any freebie configuration they stay
+   * completely inert.
    */
   public function initHooks(): void {
     // Own op on the shared SPL API endpoint (like StripePlCustomerPortal::profile_update)
@@ -63,6 +93,16 @@ class PLFreebies extends Wire {
       if ($page instanceof Page && $page->id && $page->hasField('plf_freebie') && $page->get('plf_freebie')) {
         $e->return = true;
       }
+    });
+
+    // Double opt-in: consume ?plfconfirm= before anything else looks at the request.
+    // Registered ahead of the auto-gate below so the gate cannot redirect the visitor
+    // away from the very link that is about to grant them access.
+    $this->addHookBefore('Page::render', function(\ProcessWire\HookEvent $e) {
+      $page = $e->object;
+      if (!($page instanceof Page) || !$page->id) return;
+      if ($page->id !== (int) $this->wire('page')->id) return; // only the main requested page
+      $this->handleConfirmParam();
     });
 
     // Auto-gate: any page flagged plf_freebie=1 is access-gated automatically —
@@ -255,9 +295,29 @@ class PLFreebies extends Wire {
   }
 
   /**
+   * Is this page actually a freebie? Mirrors findFreebies(): the plf_freebie flag is
+   * the marker, and when freebie templates are configured the page must use one of
+   * them. Without configured templates the flag alone decides (dormant installs).
+   */
+  public function isFreebiePage(?Page $freebie): bool {
+    if (!($freebie instanceof Page) || !$freebie->id) return false;
+    if (!$freebie->hasField('plf_freebie') || !$freebie->get('plf_freebie')) return false;
+    $names = $this->getFreebieTemplateNames();
+    return !$names || in_array((string) $freebie->template->name, $names, true);
+  }
+
+  /**
    * Grants a freebie to a user (idempotent).
+   *
+   * Validates the page itself: this method is part of the public template API and is
+   * reached with a posted page id, so it must be safe on its own – a paid product page
+   * must never end up in plf_free_access.
    */
   public function grantFreebie(User $user, Page $freebie): void {
+    if (!$this->isFreebiePage($freebie)) {
+      $this->logSec(sprintf('grantFreebie refused for non-freebie page %d', (int) $freebie->id));
+      return;
+    }
     if (!$user->hasField('plf_free_access')) return;
     if ($user->plf_free_access->has($freebie)) return;
     $user->of(false);
@@ -276,6 +336,12 @@ class PLFreebies extends Wire {
     // Process the magic link FIRST: the auto-gate hook runs before SPL's
     // handleAccessParam() in _ah_main → otherwise the redirect would intercept the
     // ?access=/?t= token. handleAccessParam() is public → call it here beforehand.
+    // Same for the opt-in link: templates may call this guard directly, i.e. without
+    // the Page::render hook above having run.
+    if (!$user->isLoggedin() && $input->get(self::CONFIRM_PARAM)) {
+      $this->handleConfirmParam(); // redirects on success
+      $user = $this->wire('user');
+    }
     if (!$user->isLoggedin() && ($input->get('access') || $input->get('t'))) {
       $this->mod->handleAccessParam();
       $user = $this->wire('user'); // forceLogin changed the current user
@@ -469,6 +535,7 @@ class PLFreebies extends Wire {
     $spl  = $this->mod;
     $h    = fn($s) => htmlspecialchars((string) $s, ENT_QUOTES);
     $csrf = $spl->wire('session')->CSRF->renderInput();
+    $this->markFormRendered();
 
     // Button label from the module's own field plf_form_button of the current page.
     $page = $this->wire('page');
@@ -501,6 +568,7 @@ class PLFreebies extends Wire {
         <input type="hidden" name="op" value="freebie_register">
         <input type="hidden" name="freebie_id" value="' . (int) $freebieId . '">
         <input type="hidden" name="return_url" value="' . $h($returnUrl) . '">
+        ' . $this->honeypotHtml() . '
         <div class="row g-3 mb-3">
           <div class="col-md-6">
             <label class="form-label">' . $h($this->tLocal('label.name')) . '</label>
@@ -553,6 +621,7 @@ class PLFreebies extends Wire {
     );
 
     [$freebieId, $returnUrl] = $this->registerContext($opts);
+    $this->markFormRendered();
 
     $spec = [
       'id'    => 'plfRegisterModal',
@@ -566,6 +635,7 @@ class PLFreebies extends Wire {
           ['type'=>'text','name'=>'name','label'=>$this->tLocal('label.name'),'attrs'=>['autocomplete'=>'name']],
           ['type'=>'email','name'=>'email','label'=>$this->tLocal('label.email'),'attrs'=>['required'=>true,'autocomplete'=>'email']],
         ],
+        'afterFieldsHtml' => $this->honeypotHtml(),
         'submitText' => $this->tLocal('register.submit'),
         'cancelText' => $this->tLocal('register.cancel'),
       ],
@@ -580,10 +650,12 @@ class PLFreebies extends Wire {
    * from their own CMS fields (e.g. this site's ah_register fields, see ready.php).
    * Default: neutral, freebie-suitable mail (NO purchase/withdrawal text).
    *
-   * @param User       $user
+   * @param User       $user          For a new signup this is an UNSAVED stand-in
+   *                                  (email + title only) – the account does not exist
+   *                                  until the recipient opens the link.
    * @param Page|null  $freebie       The freebie (for title/image).
    * @param Page|null  $registerPage  The register page (for texts, if present).
-   * @param string     $magicUrl      The ?access= link.
+   * @param string     $magicUrl      The ?plfconfirm= opt-in link.
    * @return bool
    */
   public function ___sendFreebieMail(User $user, ?Page $freebie, ?Page $registerPage, string $magicUrl, bool $isNew = true): bool {
@@ -673,6 +745,22 @@ class PLFreebies extends Wire {
       return;
     }
 
+    // Every rejection below answers exactly like a success: a bot learns nothing from
+    // the response, and neither does anyone probing for registered addresses.
+    $ok = fn() => $this->j(['ok' => true, 'msg' => $this->tLocal('api.ok_generic')]);
+
+    if (trim((string) $input->post(self::HONEYPOT)) !== '') {
+      $this->logSec('honeypot triggered (freebie_register)');
+      $e->return = $ok();
+      return;
+    }
+
+    if (($why = $this->formTimingProblem()) !== '') {
+      $this->logSec('timing rejected (freebie_register): ' . $why);
+      $e->return = $ok();
+      return;
+    }
+
     $email = $sanitizer->email((string) $input->post->email);
     $name  = trim((string) $input->post->text('name'));
     $freebieId = (int) $input->post->int('freebie_id');
@@ -683,31 +771,48 @@ class PLFreebies extends Wire {
       return;
     }
 
+    if (($why = $this->plausibilityProblem($email, $name)) !== '') {
+      $this->logSec('plausibility rejected (freebie_register): ' . $why);
+      $e->return = $ok();
+      return;
+    }
+
+    // Two counters: per IP against the mass POST, per address so nobody can bury a
+    // stranger's inbox. Unlike the withdrawal flow this answers 200, not 429 – a
+    // distinguishable response would turn the endpoint into an enumeration oracle.
+    $ipKey   = $this->rateKey((string) $session->getIP());
+    $mailKey = $this->rateKey(mb_strtolower($email));
+    if ($this->isRateLimited($ipKey) || $this->isRateLimited($mailKey)) {
+      $this->logSec('rate limit hit (freebie_register) ip=' . substr($ipKey, 0, 12) . ' mail=' . substr($mailKey, 0, 12));
+      $e->return = $ok();
+      return;
+    }
+    $this->bumpRateLimit($ipKey);
+    $this->bumpRateLimit($mailKey);
+
     try {
-      $res  = $this->createOrGetMember($email, $name);
-      $user = $res['user'];
-
       $freebie = $freebieId ? $this->wire('pages')->get($freebieId) : null;
-      if ($freebie && $freebie->id) $this->grantFreebie($user, $freebie);
+      if (!$this->isFreebiePage($freebie)) $freebie = null; // posted ids are not trusted
 
-      // Magic link: ?access=TOKEN → SPL::handleAccessParam() logs in automatically.
-      $token = $this->issueAccessToken($user, self::MAGIC_TTL_MINUTES * 60);
-      $target = ($freebie && $freebie->id) ? $freebie->httpUrl
-              : ($returnUrl ?: $this->wire('pages')->get('/')->httpUrl);
-      // The magic link ends up in an email → it MUST be absolute. A posted
-      // return_url may be a relative root path (e.g. "/account/").
-      if (!preg_match('~^https?://~i', $target)) {
-        $cfg    = $this->wire('config');
-        $target = ($cfg->https ? 'https://' : 'http://') . $cfg->httpHost . '/' . ltrim($target, '/');
-      }
-      $glue = (strpos($target, '?') === false) ? '?' : '&';
-      $magicUrl = $target . $glue . 'access=' . urlencode($token);
+      // Double opt-in: NOTHING is persisted here. The signed token carries the whole
+      // signup, and only opening the link from the mail materialises the account.
+      $target  = $this->confirmTarget($freebie, $returnUrl);
+      $token   = $this->buildPendingToken($email, $name, $freebie ? (int) $freebie->id : 0,
+                                          time() + self::MAGIC_TTL_MINUTES * 60);
+      $glue    = (strpos($target, '?') === false) ? '?' : '&';
+      $confirmUrl = $target . $glue . self::CONFIRM_PARAM . '=' . urlencode($token);
+
+      // Read-only lookup, purely to pick the right mail text (and to greet a returning
+      // member by their stored name). Creates nothing.
+      $existing  = $this->wire('users')->get('email=' . $sanitizer->selectorValue($email));
+      $isNew     = !($existing && $existing->id);
+      $recipient = $isNew ? $this->pendingUser($email, $name) : $existing;
 
       // Freebie mail (NOT SPL's purchase mail). Hookable: sites can build it via
       // addHookBefore('PLFreebies::sendFreebieMail', ... $e->replace=true)
       // entirely from their own CMS fields (see site/ready.php).
       $registerPage = $this->resolveRegisterPage($freebie);
-      $this->sendFreebieMail($user, ($freebie && $freebie->id) ? $freebie : null, $registerPage, $magicUrl, (bool) ($res['isNew'] ?? true));
+      $this->sendFreebieMail($recipient, $freebie, $registerPage, $confirmUrl, $isNew);
 
     } catch (\Throwable $ex) {
       $this->wire('log')->save('stripeplfreebies',
@@ -716,7 +821,252 @@ class PLFreebies extends Wire {
     }
 
     // Always generic „OK" (no email enumeration)
-    $e->return = $this->j(['ok' => true, 'msg' => $this->tLocal('api.ok_generic')]);
+    $e->return = $ok();
+  }
+
+  /* ========================= Double opt-in: ?plfconfirm= ========================= */
+
+  /**
+   * Consumes the confirmation link. This is where the account actually comes into
+   * existence – find-or-create, so a returning member takes the identical path and the
+   * on-screen response stays indistinguishable in both cases.
+   *
+   * Redirects on every outcome (success and failure alike) so the token never lingers
+   * in the address bar or leaks through a Referer header.
+   */
+  private function handleConfirmParam(): void {
+    $token = (string) $this->wire('input')->get(self::CONFIRM_PARAM);
+    if ($token === '') return;
+
+    $session = $this->wire('session');
+    $clean   = $this->urlWithoutConfirmParam();
+    $data    = $this->verifyPendingToken($token);
+
+    if ($data === null) {
+      $this->logSec('invalid or expired confirmation token');
+      $this->mod->modal()->queueExpiredAccessModal();
+      $session->redirect($clean, false);
+      return;
+    }
+
+    // Somebody else is signed in on this device: never swap the session from a link.
+    $current  = $this->wire('user');
+    $sameUser = $current->isLoggedin()
+             && mb_strtolower((string) $current->email) === mb_strtolower($data['email']);
+    if ($current->isLoggedin() && !$sameUser) {
+      $this->logSec('confirmation link opened while a different user is logged in');
+      $session->redirect($clean, false);
+      return;
+    }
+
+    try {
+      $res  = $this->createOrGetMember($data['email'], $data['name']);
+      $user = $res['user'];
+      $this->grantFromToken($user, $data['freebie_id']);
+      if (!$sameUser) $session->forceLogin($user);
+      $this->logSec('opt-in confirmed, member ' . $user->id . ($res['isNew'] ? ' (new)' : ' (existing)'));
+    } catch (\Throwable $ex) {
+      $this->wire('log')->save('stripeplfreebies',
+        'freebie_confirm error: ' . $ex->getMessage() . ' @ ' . $ex->getFile() . ':' . $ex->getLine());
+      $this->mod->modal()->queueExpiredAccessModal();
+    }
+
+    $session->redirect($clean, false);
+  }
+
+  /** Grants the freebie referenced by a token (grantFreebie() validates the page itself). */
+  private function grantFromToken(User $user, int $freebieId): void {
+    if (!$freebieId) return;
+    $freebie = $this->wire('pages')->get($freebieId);
+    if ($freebie && $freebie->id) $this->grantFreebie($user, $freebie);
+  }
+
+  /** Current request URL (URL segments included) with the confirmation token stripped. */
+  private function urlWithoutConfirmParam(): string {
+    $input = $this->wire('input');
+    $query = $input->get->getArray();
+    unset($query[self::CONFIRM_PARAM]);
+    $url = (string) $input->url();
+    if ($url === '') $url = $this->wire('page')->url;
+    if ($query) {
+      $clean = [];
+      foreach ($query as $k => $v) { if (is_scalar($v)) $clean[(string) $k] = (string) $v; }
+      if ($clean) $url .= '?' . http_build_query($clean);
+    }
+    return $url;
+  }
+
+  /**
+   * Signed, stateless pending signup: email|name|freebie_id|expiry under an HMAC keyed
+   * with $config->userAuthSalt. Stateless beats a $cache entry here – cache entries can
+   * be evicted, and a confirmation link that silently stops working is worse than a
+   * slightly longer URL.
+   */
+  private function buildPendingToken(string $email, string $name, int $freebieId, int $expires): string {
+    $payload = (string) json_encode([
+      'e' => $email, 'n' => $name, 'f' => $freebieId, 'x' => $expires,
+    ], JSON_UNESCAPED_UNICODE);
+    $body = rtrim(strtr(base64_encode($payload), '+/', '-_'), '=');
+    return $body . '.' . hash_hmac('sha256', $body, $this->tokenSecret());
+  }
+
+  /**
+   * @return array{email: string, name: string, freebie_id: int}|null Null on a bad
+   *   signature, a malformed payload or an expired token.
+   */
+  private function verifyPendingToken(string $token): ?array {
+    if (!preg_match('~^([A-Za-z0-9_-]+)\.([a-f0-9]{64})$~', $token, $m)) return null;
+    if (!hash_equals(hash_hmac('sha256', $m[1], $this->tokenSecret()), $m[2])) return null;
+
+    $json = base64_decode(strtr($m[1], '-_', '+/'), true);
+    $data = $json === false ? null : json_decode($json, true);
+    if (!is_array($data)) return null;
+    if ((int) ($data['x'] ?? 0) < time()) return null;
+
+    $email = $this->wire('sanitizer')->email((string) ($data['e'] ?? ''));
+    if ($email === '') return null;
+
+    return [
+      'email'      => $email,
+      'name'       => trim((string) ($data['n'] ?? '')),
+      'freebie_id' => (int) ($data['f'] ?? 0),
+    ];
+  }
+
+  private function tokenSecret(): string {
+    $salt = (string) ($this->wire('config')->userAuthSalt ?? '');
+    return $salt !== '' ? $salt : 'spl-freebie-optin';
+  }
+
+  /**
+   * Absolute target of the confirmation link. The token grants access, so the link must
+   * never point off-host – a posted return_url could otherwise hand it to a stranger.
+   */
+  private function confirmTarget(?Page $freebie, string $returnUrl): string {
+    $cfg  = $this->wire('config');
+    $home = $this->wire('pages')->get('/')->httpUrl;
+
+    $target = ($freebie && $freebie->id) ? $freebie->httpUrl : trim($returnUrl);
+    if ($target === '') return $home;
+
+    // The link ends up in an email → it MUST be absolute. A posted return_url may be a
+    // relative root path (e.g. "/account/").
+    if (!preg_match('~^https?://~i', $target)) {
+      $target = ($cfg->https ? 'https://' : 'http://') . $cfg->httpHost . '/' . ltrim($target, '/');
+    }
+
+    $stripPort = fn($h) => preg_replace('~:\d+$~', '', mb_strtolower((string) $h));
+    $allowed   = array_map($stripPort, array_merge([(string) $cfg->httpHost], (array) $cfg->httpHosts));
+    if (!in_array($stripPort(parse_url($target, PHP_URL_HOST)), $allowed, true)) {
+      $this->logSec('off-host return_url refused: ' . $target);
+      return $home;
+    }
+    return $target;
+  }
+
+  /**
+   * Unsaved stand-in for the recipient of the confirmation mail. Keeps the hookable
+   * sendFreebieMail() signature intact for sites that replace it, without a row in the
+   * user table for someone who has not confirmed anything yet.
+   */
+  private function pendingUser(string $email, string $name): User {
+    $user = new User();
+    $user->email = $email;
+    if ($name !== '' && $user->hasField('title')) $user->title = $name;
+    return $user;
+  }
+
+  /* ========================= Bot defence ========================= */
+
+  /** Off-screen decoy field. CSS-hidden on purpose: agents fill visible fields, not these. */
+  private function honeypotHtml(): string {
+    return '<div style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden;" aria-hidden="true">'
+         . '<label>Website <input type="text" name="' . self::HONEYPOT . '" tabindex="-1" autocomplete="off"></label>'
+         . '</div>';
+  }
+
+  /** Remembers when a register form was last rendered for this session (time trap). */
+  private function markFormRendered(): void {
+    $this->wire('session')->set(self::SESS_FORM_TS, time());
+  }
+
+  /** @return string Empty when the timing is plausible, otherwise the reason. */
+  private function formTimingProblem(): string {
+    $ts = (int) $this->wire('session')->get(self::SESS_FORM_TS);
+    // Fail open without a timestamp: sites may ship their own markup for
+    // op=freebie_register, and such forms never pass through the renderers here.
+    if ($ts <= 0) return '';
+    $age = time() - $ts;
+    if ($age < self::MIN_FILL_SECONDS) return 'submitted ' . $age . 's after render';
+    if ($age > self::MAX_FORM_AGE)     return 'form older than ' . self::MAX_FORM_AGE . 's';
+    return '';
+  }
+
+  /** @return string Empty when the input is plausible, otherwise the reason. */
+  private function plausibilityProblem(string $email, string $name): string {
+    $at = strrpos($email, '@');
+    if ($at === false) return 'no domain';
+    $domain = mb_strtolower(substr($email, $at + 1));
+
+    if (in_array($domain, self::DISPOSABLE_DOMAINS, true)) return 'disposable domain ' . $domain;
+    if ($this->nameLooksSpam($name)) return 'implausible name';
+    if (!$this->domainAcceptsMail($domain)) return 'no MX for ' . $domain;
+    return '';
+  }
+
+  /**
+   * The name is optional and becomes the display name verbatim, so a spam name
+   * disqualifies the whole submission rather than just the field.
+   */
+  private function nameLooksSpam(string $name): bool {
+    if ($name === '') return false;
+    if (mb_strlen($name) > self::NAME_MAX_LENGTH) return true;
+    if (preg_match('~https?://|www\.|\[url|<a\s~i', $name)) return true;
+    $digits = preg_match_all('/\d/', $name);
+    return $digits > 0 && ($digits / max(1, mb_strlen($name))) > 0.4;
+  }
+
+  /**
+   * MX lookup with a deliberate fail-open: a broken resolver must never block real
+   * leads. checkdnsrr() cannot tell "no record" from "lookup failed", so a negative
+   * result is cross-checked against a host that is known to resolve.
+   */
+  private function domainAcceptsMail(string $domain): bool {
+    if (!function_exists('checkdnsrr')) {
+      $this->logSec('checkdnsrr unavailable – MX check skipped');
+      return true;
+    }
+    try {
+      if (checkdnsrr($domain, 'MX')) return true;
+      $control = preg_replace('~:\d+$~', '', (string) $this->wire('config')->httpHost);
+      if ($control !== '' && !checkdnsrr($control, 'A') && !checkdnsrr($control, 'MX')) {
+        $this->logSec('resolver unreachable – MX check skipped for ' . $domain);
+        return true;
+      }
+      return false;
+    } catch (\Throwable $ex) {
+      $this->logSec('MX check failed (' . $ex->getMessage() . ') – skipped for ' . $domain);
+      return true;
+    }
+  }
+
+  /** Rate-limit key: HMAC so neither an IP nor an address is stored in clear. */
+  private function rateKey(string $value): string {
+    return substr(hash_hmac('sha256', $value, $this->tokenSecret()), 0, 32);
+  }
+
+  private function isRateLimited(string $key): bool {
+    return (int) $this->wire('cache')->getFor('StripePaymentLinks', self::RATE_PREFIX . $key) >= self::RATE_LIMIT;
+  }
+
+  private function bumpRateLimit(string $key): void {
+    $cache = $this->wire('cache');
+    $name  = self::RATE_PREFIX . $key;
+    $cache->saveFor('StripePaymentLinks', $name, (int) $cache->getFor('StripePaymentLinks', $name) + 1, self::RATE_WINDOW);
+  }
+
+  private function logSec(string $msg): void {
+    $this->wire('log')->save(StripePaymentLinks::LOG_SEC, '[FREEBIE] ' . $msg);
   }
 
   /* ========================= Helpers: user + token ========================= */
@@ -747,12 +1097,9 @@ class PLFreebies extends Wire {
       try {
         $users->save($user);
       } catch (\Throwable $e) {
-        // Context-specific: this registration runs inside the API endpoint hook
-        // (/stripepaymentlinks/api, 404 context). There Page::localPath
-        // (LanguageSupportPageNames) is not hooked for the user page, and the
-        // core PagePaths move hook calls it on creation → exception AFTER the
-        // DB insert. (SPL::createUserFromStripe is NOT affected, because it creates
-        // users during a normal page render.) The user is persisted
+        // Defensive: creating a user from a hook context has been seen to throw AFTER
+        // the DB insert (Page::localPath is not hooked for the user page there, while
+        // the core PagePaths move hook calls it on creation). The user is persisted
         // → reload and continue; only re-throw on a real failure.
         $reloaded = $users->get('email=' . $sanitizer->selectorValue($email));
         if ($reloaded && $reloaded->id) { $user = $reloaded; }
@@ -768,19 +1115,6 @@ class PLFreebies extends Wire {
     }
 
     return ['user' => $user, 'isNew' => $isNew];
-  }
-
-  /**
-   * Creates an access_token (+expiry) on the user. Counterpart to SPL's (protected)
-   * createAccessToken(); uses the same fields that SPL::handleAccessParam() checks.
-   */
-  private function issueAccessToken(User $user, int $ttlSeconds): string {
-    $token = bin2hex(random_bytes(32));
-    $user->of(false);
-    if ($user->hasField('access_token'))   $user->access_token   = $token;
-    if ($user->hasField('access_expires')) $user->access_expires = time() + max(60, $ttlSeconds);
-    $this->wire('users')->save($user, ['quiet' => true]);
-    return $token;
   }
 
   /* ========================= Freebie source (global) ========================= */
